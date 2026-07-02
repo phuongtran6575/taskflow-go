@@ -1,0 +1,4715 @@
+basePath: /api/v1
+definitions:
+  appresponse.ErrorInfo:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  appresponse.Meta:
+    properties:
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  appresponse.Response:
+    properties:
+      data: {}
+      error:
+        $ref: '#/definitions/appresponse.ErrorInfo'
+      meta:
+        $ref: '#/definitions/appresponse.Meta'
+      success:
+        type: boolean
+    type: object
+  dto.AddMembersRequest:
+    properties:
+      members:
+        items:
+          $ref: '#/definitions/dto.MemberRolePair'
+        type: array
+    required:
+    - members
+    type: object
+  dto.AssignLabelsRequest:
+    properties:
+      label_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - label_ids
+    type: object
+  dto.AssignMembersRequest:
+    properties:
+      user_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - user_ids
+    type: object
+  dto.AssignPermissionsRequest:
+    properties:
+      permission_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - permission_ids
+    type: object
+  dto.ChangePasswordRequest:
+    properties:
+      confirm_password:
+        type: string
+      current_password:
+        type: string
+      new_password:
+        minLength: 8
+        type: string
+    required:
+    - confirm_password
+    - current_password
+    - new_password
+    type: object
+  dto.CreateAnnouncementRequest:
+    properties:
+      content:
+        type: string
+      target_roles:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    required:
+    - content
+    - title
+    type: object
+  dto.CreateColumnRequest:
+    properties:
+      title:
+        type: string
+    required:
+    - title
+    type: object
+  dto.CreateCommentRequest:
+    properties:
+      content:
+        type: string
+    required:
+    - content
+    type: object
+  dto.CreateInviteRequest:
+    properties:
+      expires_at:
+        type: string
+      max_uses:
+        type: integer
+      role:
+        type: string
+    type: object
+  dto.CreateLabelRequest:
+    properties:
+      color:
+        type: string
+      name:
+        type: string
+    required:
+    - color
+    - name
+    type: object
+  dto.CreateProjectRequest:
+    properties:
+      background:
+        type: string
+      icon:
+        type: string
+      key:
+        type: string
+      name:
+        type: string
+    required:
+    - key
+    - name
+    type: object
+  dto.CreateRoleRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+      permission_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - name
+    type: object
+  dto.CreateSubtaskRequest:
+    properties:
+      assignee_ids:
+        items:
+          type: string
+        type: array
+      due_date:
+        type: string
+      priority:
+        type: string
+      title:
+        type: string
+    required:
+    - title
+    type: object
+  dto.CreateTaskRequest:
+    properties:
+      assignee_ids:
+        items:
+          type: string
+        type: array
+      column_id:
+        type: string
+      description:
+        type: string
+      due_date:
+        type: string
+      label_ids:
+        items:
+          type: string
+        type: array
+      priority:
+        type: string
+      start_date:
+        type: string
+      title:
+        type: string
+    required:
+    - column_id
+    - title
+    type: object
+  dto.CreateWorkspaceRequest:
+    properties:
+      domain:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  dto.DeleteAccountRequest:
+    properties:
+      confirmation:
+        type: string
+      password:
+        type: string
+    required:
+    - confirmation
+    type: object
+  dto.DeleteColumnRequest:
+    properties:
+      strategy:
+        type: string
+      target_column_id:
+        type: string
+    type: object
+  dto.DeleteProjectRequest:
+    properties:
+      confirmation_name:
+        type: string
+    required:
+    - confirmation_name
+    type: object
+  dto.DeleteWorkspaceRequest:
+    properties:
+      confirmation_name:
+        type: string
+    required:
+    - confirmation_name
+    type: object
+  dto.ForgotPasswordRequest:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
+  dto.LeaveProjectRequest:
+    properties:
+      confirmation:
+        type: boolean
+    required:
+    - confirmation
+    type: object
+  dto.LeaveWorkspaceRequest:
+    properties:
+      confirmation:
+        type: boolean
+    required:
+    - confirmation
+    type: object
+  dto.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  dto.LogoutRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  dto.MarkAllAsReadRequest:
+    properties:
+      type:
+        type: string
+    type: object
+  dto.MemberRolePair:
+    properties:
+      role_id:
+        type: string
+      user_id:
+        type: string
+    required:
+    - role_id
+    - user_id
+    type: object
+  dto.MoveTaskRequest:
+    properties:
+      column_id:
+        type: string
+      next_position:
+        type: number
+      previous_position:
+        type: number
+    required:
+    - column_id
+    type: object
+  dto.RefreshTokenRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  dto.RegisterRequest:
+    properties:
+      confirm_password:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      password:
+        minLength: 8
+        type: string
+      phone_number:
+        type: string
+      username:
+        maxLength: 50
+        minLength: 3
+        type: string
+    required:
+    - confirm_password
+    - email
+    - full_name
+    - password
+    - phone_number
+    - username
+    type: object
+  dto.RemoveLabelsRequest:
+    properties:
+      label_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - label_ids
+    type: object
+  dto.RemovePermissionsRequest:
+    properties:
+      permission_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - permission_ids
+    type: object
+  dto.ResetPasswordRequest:
+    properties:
+      confirm_password:
+        type: string
+      new_password:
+        minLength: 8
+        type: string
+      token:
+        type: string
+    required:
+    - confirm_password
+    - new_password
+    - token
+    type: object
+  dto.TransferOwnershipRequest:
+    properties:
+      confirmation:
+        type: string
+      new_owner_id:
+        type: string
+    required:
+    - confirmation
+    - new_owner_id
+    type: object
+  dto.UnassignMembersRequest:
+    properties:
+      user_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - user_ids
+    type: object
+  dto.UpdateColumnPositionRequest:
+    properties:
+      next_position:
+        type: number
+      previous_position:
+        type: number
+    type: object
+  dto.UpdateColumnTitleRequest:
+    properties:
+      title:
+        type: string
+    required:
+    - title
+    type: object
+  dto.UpdateCommentRequest:
+    properties:
+      content:
+        type: string
+    required:
+    - content
+    type: object
+  dto.UpdateLabelRequest:
+    properties:
+      color:
+        type: string
+      name:
+        minLength: 1
+        type: string
+    type: object
+  dto.UpdateMemberRoleRequest:
+    properties:
+      role:
+        type: string
+    required:
+    - role
+    type: object
+  dto.UpdateProfileRequest:
+    properties:
+      full_name:
+        minLength: 1
+        type: string
+      username:
+        minLength: 3
+        type: string
+    type: object
+  dto.UpdateProjectMemberRoleRequest:
+    properties:
+      role_id:
+        type: string
+    required:
+    - role_id
+    type: object
+  dto.UpdateProjectRequest:
+    properties:
+      background:
+        type: string
+      icon:
+        type: string
+      name:
+        minLength: 1
+        type: string
+    type: object
+  dto.UpdateRoleRequest:
+    properties:
+      description:
+        type: string
+      name:
+        minLength: 1
+        type: string
+    type: object
+  dto.UpdateTaskRequest:
+    properties:
+      description:
+        type: string
+      due_date:
+        type: string
+      priority:
+        type: string
+      start_date:
+        type: string
+      title:
+        minLength: 1
+        type: string
+    type: object
+  dto.UpdateWorkspaceRequest:
+    properties:
+      domain:
+        type: string
+      name:
+        minLength: 1
+        type: string
+    type: object
+  dto.UpgradePlanRequest:
+    properties:
+      new_plan:
+        type: string
+    required:
+    - new_plan
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@taskflow.io
+    name: TaskFlow Support
+  description: Task management API with workspace, project, and team collaboration
+    features.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://taskflow.io/terms
+  title: TaskFlow API
+  version: "1.0"
+paths:
+  /auth/forgot-password:
+    post:
+      consumes:
+      - application/json
+      description: Send password reset email to the given email address
+      parameters:
+      - description: Registered email
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ForgotPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Request password reset
+      tags:
+      - Auth
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user with email and password, returns JWT tokens
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Login user
+      tags:
+      - Auth
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Invalidate refresh token to log out
+      parameters:
+      - description: Refresh token to invalidate
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LogoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Logout user
+      tags:
+      - Auth
+  /auth/oauth/github:
+    get:
+      description: Redirect user to GitHub OAuth consent screen
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Found
+      summary: Initiate GitHub OAuth login
+      tags:
+      - Auth
+  /auth/oauth/github/callback:
+    get:
+      description: Handle GitHub OAuth callback and return JWT tokens
+      parameters:
+      - description: Authorization code from GitHub
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: GitHub OAuth callback
+      tags:
+      - Auth
+  /auth/oauth/google:
+    get:
+      description: Redirect user to Google OAuth consent screen
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Found
+      summary: Initiate Google OAuth login
+      tags:
+      - Auth
+  /auth/oauth/google/callback:
+    get:
+      description: Handle Google OAuth callback and return JWT tokens
+      parameters:
+      - description: Authorization code from Google
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Google OAuth callback
+      tags:
+      - Auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Get a new access token using a valid refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RefreshTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Refresh access token
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Create a new user account with email and password
+      parameters:
+      - description: Registration details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Register a new user
+      tags:
+      - Auth
+  /auth/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: Reset password using the token from the reset email
+      parameters:
+      - description: Reset token and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Reset password
+      tags:
+      - Auth
+  /permissions:
+    get:
+      consumes:
+      - application/json
+      description: List all permissions, optionally grouped by module
+      parameters:
+      - default: true
+        description: Group by module
+        in: query
+        name: grouped
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List all permissions
+      tags:
+      - Permissions
+  /permissions/{id_or_slug}:
+    get:
+      consumes:
+      - application/json
+      description: Get a single permission by its ID or slug
+      parameters:
+      - description: Permission ID or slug
+        in: path
+        name: id_or_slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get permission by ID or slug
+      tags:
+      - Permissions
+  /permissions/modules:
+    get:
+      consumes:
+      - application/json
+      description: List all permission modules
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List permission modules
+      tags:
+      - Permissions
+  /permissions/modules/{module}:
+    get:
+      consumes:
+      - application/json
+      description: Get all permissions for a specific module
+      parameters:
+      - description: Module name
+        in: path
+        name: module
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get permissions by module
+      tags:
+      - Permissions
+  /users/me:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete the current user's account
+      parameters:
+      - description: Account deletion confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.DeleteAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete account
+      tags:
+      - Users
+    get:
+      consumes:
+      - application/json
+      description: Get the current authenticated user's profile
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get user profile
+      tags:
+      - Users
+    patch:
+      consumes:
+      - application/json
+      description: Update the current user's profile information
+      parameters:
+      - description: Profile update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Users
+  /users/me/avatar:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the current user's avatar
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove avatar
+      tags:
+      - Users
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a new avatar image for the current user
+      parameters:
+      - description: Avatar image file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Upload avatar
+      tags:
+      - Users
+  /users/me/password:
+    put:
+      consumes:
+      - application/json
+      description: Change the current user's password
+      parameters:
+      - description: Password change data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Change password
+      tags:
+      - Users
+  /users/me/sessions:
+    delete:
+      consumes:
+      - application/json
+      description: Revoke all sessions except the current one
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Revoke all other sessions
+      tags:
+      - Users
+    get:
+      consumes:
+      - application/json
+      description: Get all active sessions for the current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List user sessions
+      tags:
+      - Users
+  /users/me/sessions/{session_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Revoke a specific session by ID
+      parameters:
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Revoke a session
+      tags:
+      - Users
+  /workspaces:
+    get:
+      consumes:
+      - application/json
+      description: Get all workspaces the current user belongs to
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List user's workspaces
+      tags:
+      - Workspaces
+    post:
+      consumes:
+      - application/json
+      description: Create a new workspace
+      parameters:
+      - description: Workspace details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateWorkspaceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create workspace
+      tags:
+      - Workspaces
+  /workspaces/{workspace_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Deletion confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.DeleteWorkspaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete workspace
+      tags:
+      - Workspaces
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get workspace details
+      tags:
+      - Workspaces
+    patch:
+      consumes:
+      - application/json
+      description: Update workspace details
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Workspace update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateWorkspaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update workspace
+      tags:
+      - Workspaces
+  /workspaces/{workspace_id}/invites:
+    get:
+      consumes:
+      - application/json
+      description: List all invites for a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List workspace invites
+      tags:
+      - Workspace Invites
+    post:
+      consumes:
+      - application/json
+      description: Create an invite link for a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Invite details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateInviteRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create invite
+      tags:
+      - Workspace Invites
+  /workspaces/{workspace_id}/invites/{invite_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Revoke a pending workspace invite
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Invite ID
+        in: path
+        name: invite_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Revoke invite
+      tags:
+      - Workspace Invites
+  /workspaces/{workspace_id}/invites/join/{code}:
+    post:
+      consumes:
+      - application/json
+      description: Join a workspace using an invite code
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Invite code
+        in: path
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Join workspace via invite
+      tags:
+      - Workspace Invites
+  /workspaces/{workspace_id}/invites/preview/{code}:
+    get:
+      description: Preview workspace invite details by code (public)
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Invite code
+        in: path
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      summary: Preview invite
+      tags:
+      - Workspace Invites
+  /workspaces/{workspace_id}/members:
+    get:
+      consumes:
+      - application/json
+      description: List members of a workspace with pagination and filters
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - description: Filter by role
+        in: query
+        name: role
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List workspace members
+      tags:
+      - Workspace Members
+  /workspaces/{workspace_id}/members/{user_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a member from the workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Target user ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove workspace member
+      tags:
+      - Workspace Members
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workspace member
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get member details
+      tags:
+      - Workspace Members
+  /workspaces/{workspace_id}/members/{user_id}/role:
+    patch:
+      consumes:
+      - application/json
+      description: Update the role of a workspace member
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Target user ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      - description: New role details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateMemberRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update member role
+      tags:
+      - Workspace Members
+  /workspaces/{workspace_id}/members/me:
+    delete:
+      consumes:
+      - application/json
+      description: Leave a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Leaving workspace confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LeaveWorkspaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Leave workspace
+      tags:
+      - Workspace Members
+  /workspaces/{workspace_id}/members/transfer-ownership:
+    post:
+      consumes:
+      - application/json
+      description: Transfer workspace ownership to another member
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: New owner details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.TransferOwnershipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Transfer workspace ownership
+      tags:
+      - Workspace Members
+  /workspaces/{workspace_id}/my-tasks:
+    get:
+      consumes:
+      - application/json
+      description: Get tasks assigned to the current user in a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by priority
+        in: query
+        name: priority
+        type: string
+      - description: Filter by project ID
+        in: query
+        name: project_id
+        type: string
+      - description: Filter by column ID
+        in: query
+        name: column_id
+        type: string
+      - description: Due date from (RFC3339)
+        in: query
+        name: due_date_from
+        type: string
+      - description: Due date to (RFC3339)
+        in: query
+        name: due_date_to
+        type: string
+      - description: Filter overdue tasks
+        in: query
+        name: overdue
+        type: boolean
+      - default: false
+        description: Include archived projects
+        in: query
+        name: include_archived
+        type: boolean
+      - default: true
+        description: Include subtasks
+        in: query
+        name: include_subtasks
+        type: boolean
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - default: due_date
+        description: Sort field
+        in: query
+        name: sort_by
+        type: string
+      - default: asc
+        description: Sort direction
+        in: query
+        name: sort_dir
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get my tasks
+      tags:
+      - Tasks
+  /workspaces/{workspace_id}/notifications:
+    get:
+      consumes:
+      - application/json
+      description: List notifications for the current user with cursor-based pagination
+        and filters
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor for pagination
+        in: query
+        name: cursor
+        type: string
+      - description: Filter by read status
+        in: query
+        name: is_read
+        type: boolean
+      - description: Filter by types (comma separated)
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List notifications
+      tags:
+      - Notifications
+  /workspaces/{workspace_id}/notifications/{notification_id}/read:
+    patch:
+      consumes:
+      - application/json
+      description: Mark a single notification as read
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Notification ID
+        in: path
+        name: notification_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Mark notification as read
+      tags:
+      - Notifications
+  /workspaces/{workspace_id}/notifications/announcements:
+    post:
+      consumes:
+      - application/json
+      description: Create a workspace announcement notification
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Announcement details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateAnnouncementRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create announcement
+      tags:
+      - Notifications
+  /workspaces/{workspace_id}/notifications/read-all:
+    patch:
+      consumes:
+      - application/json
+      description: Mark all notifications as read, optionally filtered by type
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Optional type filter
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.MarkAllAsReadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Mark all notifications as read
+      tags:
+      - Notifications
+  /workspaces/{workspace_id}/notifications/unread-count:
+    get:
+      consumes:
+      - application/json
+      description: Get the count of unread notifications for the current user
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get unread notification count
+      tags:
+      - Notifications
+  /workspaces/{workspace_id}/plan:
+    put:
+      consumes:
+      - application/json
+      description: Upgrade the workspace subscription plan
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Plan upgrade details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpgradePlanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Upgrade workspace plan
+      tags:
+      - Workspaces
+  /workspaces/{workspace_id}/projects:
+    get:
+      consumes:
+      - application/json
+      description: List projects in a workspace with filters (archived, favorite,
+        search)
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - description: Filter by archived status
+        in: query
+        name: is_archived
+        type: boolean
+      - description: Filter by favorite status
+        in: query
+        name: is_favorite
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List projects
+      tags:
+      - Projects
+    post:
+      consumes:
+      - application/json
+      description: Create a new project in a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create project
+      tags:
+      - Projects
+  /workspaces/{workspace_id}/projects/{project_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Deletion confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.DeleteProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete project
+      tags:
+      - Projects
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get project details
+      tags:
+      - Projects
+    patch:
+      consumes:
+      - application/json
+      description: Update project details
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Project update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update project
+      tags:
+      - Projects
+  /workspaces/{workspace_id}/projects/{project_id}/archive:
+    patch:
+      consumes:
+      - application/json
+      description: Archive a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Archive project
+      tags:
+      - Projects
+  /workspaces/{workspace_id}/projects/{project_id}/board:
+    get:
+      consumes:
+      - application/json
+      description: Get board view data with tasks grouped by column and filters
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - collectionFormat: csv
+        description: Filter by priorities
+        in: query
+        items:
+          type: string
+        name: priority
+        type: array
+      - collectionFormat: csv
+        description: Filter by assignee IDs
+        in: query
+        items:
+          type: string
+        name: assignee_id
+        type: array
+      - collectionFormat: csv
+        description: Filter by label IDs
+        in: query
+        items:
+          type: string
+        name: label_id
+        type: array
+      - description: Due date from (RFC3339)
+        in: query
+        name: due_date_from
+        type: string
+      - description: Due date to (RFC3339)
+        in: query
+        name: due_date_to
+        type: string
+      - description: Filter by creator ID
+        in: query
+        name: creator_id
+        type: string
+      - description: Filter tasks with/without assignee
+        in: query
+        name: has_assignee
+        type: boolean
+      - description: Filter overdue tasks
+        in: query
+        name: overdue
+        type: boolean
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - default: 20
+        description: Tasks per column
+        in: query
+        name: tasks_per_column
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get board data
+      tags:
+      - Board
+  /workspaces/{workspace_id}/projects/{project_id}/columns:
+    get:
+      consumes:
+      - application/json
+      description: List all columns in a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List columns
+      tags:
+      - Columns
+    post:
+      consumes:
+      - application/json
+      description: Create a new column in a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Column details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create column
+      tags:
+      - Columns
+  /workspaces/{workspace_id}/projects/{project_id}/columns/{column_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a column
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Column ID
+        in: path
+        name: column_id
+        required: true
+        type: string
+      - description: Deletion confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.DeleteColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete column
+      tags:
+      - Columns
+  /workspaces/{workspace_id}/projects/{project_id}/columns/{column_id}/position:
+    patch:
+      consumes:
+      - application/json
+      description: Update the position of a column
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Column ID
+        in: path
+        name: column_id
+        required: true
+        type: string
+      - description: New position
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateColumnPositionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update column position
+      tags:
+      - Columns
+  /workspaces/{workspace_id}/projects/{project_id}/columns/{column_id}/title:
+    patch:
+      consumes:
+      - application/json
+      description: Update the title of a column
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Column ID
+        in: path
+        name: column_id
+        required: true
+        type: string
+      - description: New title
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateColumnTitleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update column title
+      tags:
+      - Columns
+  /workspaces/{workspace_id}/projects/{project_id}/favorite:
+    patch:
+      consumes:
+      - application/json
+      description: Toggle the favorite status of a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Toggle project favorite
+      tags:
+      - Projects
+  /workspaces/{workspace_id}/projects/{project_id}/labels:
+    get:
+      consumes:
+      - application/json
+      description: List all labels in a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - default: true
+        description: Include task count
+        in: query
+        name: with_task_count
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List project labels
+      tags:
+      - Labels
+    post:
+      consumes:
+      - application/json
+      description: Create a new label in a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateLabelRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create label
+      tags:
+      - Labels
+  /workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a label
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label ID
+        in: path
+        name: label_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete label
+      tags:
+      - Labels
+    patch:
+      consumes:
+      - application/json
+      description: Update a label's name or color
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label ID
+        in: path
+        name: label_id
+        required: true
+        type: string
+      - description: Label update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateLabelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update label
+      tags:
+      - Labels
+  /workspaces/{workspace_id}/projects/{project_id}/members:
+    get:
+      consumes:
+      - application/json
+      description: List members of a project with pagination
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - description: Filter by role ID
+        in: query
+        name: role_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List project members
+      tags:
+      - Project Members
+    post:
+      consumes:
+      - application/json
+      description: Add workspace members to a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Members to add
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AddMembersRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Add members to project
+      tags:
+      - Project Members
+  /workspaces/{workspace_id}/projects/{project_id}/members/{user_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a member from the project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Target user ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove project member
+      tags:
+      - Project Members
+  /workspaces/{workspace_id}/projects/{project_id}/members/{user_id}/role:
+    patch:
+      consumes:
+      - application/json
+      description: Update a project member's role
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Target user ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      - description: New role details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateProjectMemberRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update project member role
+      tags:
+      - Project Members
+  /workspaces/{workspace_id}/projects/{project_id}/members/available:
+    get:
+      consumes:
+      - application/json
+      description: Get workspace members that are not yet added to the project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get available workspace members
+      tags:
+      - Project Members
+  /workspaces/{workspace_id}/projects/{project_id}/members/me:
+    delete:
+      consumes:
+      - application/json
+      description: Leave a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Leaving confirmation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LeaveProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Leave project
+      tags:
+      - Project Members
+  /workspaces/{workspace_id}/projects/{project_id}/tasks:
+    get:
+      consumes:
+      - application/json
+      description: List tasks in a project with filters
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by column ID
+        in: query
+        name: column_id
+        type: string
+      - description: Filter by priority
+        in: query
+        name: priority
+        type: string
+      - description: Filter by assignee ID
+        in: query
+        name: assignee_id
+        type: string
+      - description: Filter by label ID
+        in: query
+        name: label_id
+        type: string
+      - description: Due date from (RFC3339)
+        in: query
+        name: due_date_from
+        type: string
+      - description: Due date to (RFC3339)
+        in: query
+        name: due_date_to
+        type: string
+      - description: Filter tasks with/without assignee
+        in: query
+        name: has_assignee
+        type: boolean
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List tasks
+      tags:
+      - Tasks
+    post:
+      consumes:
+      - application/json
+      description: Create a new task in a project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create task
+      tags:
+      - Tasks
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete task
+      tags:
+      - Tasks
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get task details
+      tags:
+      - Tasks
+    patch:
+      consumes:
+      - application/json
+      description: Update a task's details
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Task update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update task
+      tags:
+      - Tasks
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/assignees:
+    delete:
+      consumes:
+      - application/json
+      description: Unassign members from a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Members to unassign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UnassignMembersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Unassign members from task
+      tags:
+      - Task Assignees
+    get:
+      consumes:
+      - application/json
+      description: List all assignees of a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List task assignees
+      tags:
+      - Task Assignees
+    post:
+      consumes:
+      - application/json
+      description: Assign project members to a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Members to assign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AssignMembersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Assign members to task
+      tags:
+      - Task Assignees
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/assignees/available:
+    get:
+      consumes:
+      - application/json
+      description: Get project members available to be assigned to a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get available assignees
+      tags:
+      - Task Assignees
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/assignees/me:
+    delete:
+      consumes:
+      - application/json
+      description: Remove the current user from a task's assignees
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Self-unassign from task
+      tags:
+      - Task Assignees
+    post:
+      consumes:
+      - application/json
+      description: Assign the current user to a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Self-assign to task
+      tags:
+      - Task Assignees
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/attachments:
+    get:
+      consumes:
+      - application/json
+      description: List all attachments on a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by file type
+        in: query
+        name: file_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List task attachments
+      tags:
+      - Attachments
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload multiple files as task attachments
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Files to upload (multiple allowed)
+        in: formData
+        name: files
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Upload attachments
+      tags:
+      - Attachments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete an attachment
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Attachment ID
+        in: path
+        name: attachment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete attachment
+      tags:
+      - Attachments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}/download:
+    get:
+      consumes:
+      - application/json
+      description: Get a presigned download URL for an attachment
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Attachment ID
+        in: path
+        name: attachment_id
+        required: true
+        type: string
+      - default: attachment
+        description: Content disposition (attachment/inline)
+        in: query
+        name: disposition
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get download URL
+      tags:
+      - Attachments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/attachments/{attachment_id}/preview:
+    get:
+      consumes:
+      - application/json
+      description: Get a preview URL for an attachment (images, documents)
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Attachment ID
+        in: path
+        name: attachment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get preview URL
+      tags:
+      - Attachments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/comments:
+    get:
+      consumes:
+      - application/json
+      description: List comments on a task with cursor-based pagination
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - default: 30
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Cursor for pagination
+        in: query
+        name: cursor
+        type: string
+      - default: asc
+        description: Sort direction (asc/desc)
+        in: query
+        name: direction
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List comments
+      tags:
+      - Comments
+    post:
+      consumes:
+      - application/json
+      description: Create a new comment on a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Comment content
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateCommentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create comment
+      tags:
+      - Comments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/comments/{comment_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a comment
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete comment
+      tags:
+      - Comments
+    patch:
+      consumes:
+      - application/json
+      description: Update a comment's content
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Updated comment content
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateCommentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update comment
+      tags:
+      - Comments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/comments/mentionable:
+    get:
+      consumes:
+      - application/json
+      description: Get users that can be mentioned in a comment
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - default: 10
+        description: Maximum results
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get mentionable users
+      tags:
+      - Comments
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/labels:
+    delete:
+      consumes:
+      - application/json
+      description: Remove labels from a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Labels to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RemoveLabelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove labels from task
+      tags:
+      - Labels
+    get:
+      consumes:
+      - application/json
+      description: List all labels assigned to a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List task labels
+      tags:
+      - Labels
+    post:
+      consumes:
+      - application/json
+      description: Assign labels to a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Labels to assign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AssignLabelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Assign labels to task
+      tags:
+      - Labels
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/move:
+    patch:
+      consumes:
+      - application/json
+      description: Move a task to a different column or position
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Move details (target column and position)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.MoveTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Move task
+      tags:
+      - Board
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}/subtasks:
+    get:
+      consumes:
+      - application/json
+      description: List all subtasks of a task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Parent task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List subtasks
+      tags:
+      - Tasks
+    post:
+      consumes:
+      - application/json
+      description: Create a subtask under an existing task
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Parent task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Subtask details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateSubtaskRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create subtask
+      tags:
+      - Tasks
+  /workspaces/{workspace_id}/projects/{project_id}/tasks/search:
+    get:
+      consumes:
+      - application/json
+      description: Search tasks with advanced filters
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      - description: Filter by priority
+        in: query
+        name: priority
+        type: string
+      - description: Filter by assignee ID
+        in: query
+        name: assignee_id
+        type: string
+      - description: Filter by label ID
+        in: query
+        name: label_id
+        type: string
+      - description: Filter by creator ID
+        in: query
+        name: creator_id
+        type: string
+      - description: Filter by column ID
+        in: query
+        name: column_id
+        type: string
+      - description: Due date from (RFC3339)
+        in: query
+        name: due_date_from
+        type: string
+      - description: Due date to (RFC3339)
+        in: query
+        name: due_date_to
+        type: string
+      - description: Filter tasks with/without assignee
+        in: query
+        name: has_assignee
+        type: boolean
+      - description: Filter overdue tasks
+        in: query
+        name: overdue
+        type: boolean
+      - default: false
+        description: Include subtasks in results
+        in: query
+        name: include_subtasks
+        type: boolean
+      - default: position
+        description: Sort field
+        in: query
+        name: sort_by
+        type: string
+      - default: asc
+        description: Sort direction
+        in: query
+        name: sort_dir
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Search tasks
+      tags:
+      - Tasks
+  /workspaces/{workspace_id}/projects/{project_id}/unarchive:
+    patch:
+      consumes:
+      - application/json
+      description: Unarchive a previously archived project
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Unarchive project
+      tags:
+      - Projects
+  /workspaces/{workspace_id}/roles:
+    get:
+      consumes:
+      - application/json
+      description: List all roles in a workspace with pagination
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Search keyword
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: List roles
+      tags:
+      - Roles
+    post:
+      consumes:
+      - application/json
+      description: Create a new role in a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Create role
+      tags:
+      - Roles
+  /workspaces/{workspace_id}/roles/{role_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently delete a role from the workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role ID
+        in: path
+        name: role_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete role
+      tags:
+      - Roles
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific role including permissions
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role ID
+        in: path
+        name: role_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get role details
+      tags:
+      - Roles
+    patch:
+      consumes:
+      - application/json
+      description: Update role name or description
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role ID
+        in: path
+        name: role_id
+        required: true
+        type: string
+      - description: Role update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Update role
+      tags:
+      - Roles
+  /workspaces/{workspace_id}/roles/{role_id}/permissions:
+    delete:
+      consumes:
+      - application/json
+      description: Remove permissions from a role
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role ID
+        in: path
+        name: role_id
+        required: true
+        type: string
+      - description: Permissions to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RemovePermissionsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove permissions from role
+      tags:
+      - Roles
+    post:
+      consumes:
+      - application/json
+      description: Assign permissions to a role
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: Role ID
+        in: path
+        name: role_id
+        required: true
+        type: string
+      - description: Permissions to assign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AssignPermissionsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Assign permissions to role
+      tags:
+      - Roles
+  /workspaces/{workspace_id}/storage:
+    get:
+      consumes:
+      - application/json
+      description: Get storage usage for a workspace
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/appresponse.Response'
+      security:
+      - BearerAuth: []
+      summary: Get storage usage
+      tags:
+      - Attachments
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer " followed by your JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
