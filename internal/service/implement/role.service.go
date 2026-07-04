@@ -4,6 +4,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -57,17 +58,6 @@ func (s *roleService) isRoleNameTaken(workspaceID, name, excludeID string) bool 
 	return false
 }
 
-func (s *roleService) getRoleLimit(plan models.WorkspacePlan) int {
-	switch plan {
-	case models.WorkspacePlanFREE:
-		return 20
-	case models.WorkspacePlanPRO:
-		return 50
-	default:
-		return -1
-	}
-}
-
 func (s *roleService) ListRoles(workspaceID string, userID string, search string, page int, limit int) ([]dto.RoleSummary, *dto.Pagination, error) {
 	return s.roleRepo.ListWithPagination(workspaceID, search, page, limit)
 }
@@ -86,13 +76,8 @@ func (s *roleService) CreateRole(workspaceID string, userID string, req *dto.Cre
 		}
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get workspace")
 	}
-	roles, err := 	s.roleRepo.ListByWorkspaceID(workspaceID)
-	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to count roles")
-	}
-	limit := s.getRoleLimit(workspace.Plan)
-	if limit > 0 && len(roles) >= limit {
-		return nil, apperror.ErrRoleLimitReached
+	if err := helper.CheckCustomRolesAllowed(workspace.Plan); err != nil {
+		return nil, err
 	}
 
 	if len(req.PermissionIDs) > 0 {

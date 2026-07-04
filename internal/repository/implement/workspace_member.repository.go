@@ -14,6 +14,11 @@ type workspaceMemberRepository struct{ db *gorm.DB }
 func NewWorkspaceMemberRepository(db *gorm.DB) _interface.WorkspaceMemberRepository {
 	return &workspaceMemberRepository{db: db}
 }
+
+func (r *workspaceMemberRepository) WithTx(tx *gorm.DB) _interface.WorkspaceMemberRepository {
+	return &workspaceMemberRepository{db: tx}
+}
+
 func (r *workspaceMemberRepository) GetMemberWithInfor(workspaceID string, userID string) (*projection.MemberWithInfoRow, error) {
 	var result projection.MemberWithInfoRow
 	err := r.db.Table("workspace_members wm").
@@ -81,11 +86,21 @@ func (r *workspaceMemberRepository) ListWithPagination(workspaceID string, searc
 
 	offset := (page - 1) * limit
 	var members []dto.MemberInfo
-	if err := query.
-		Select("wm.user_id, u.full_name, u.username, u.email, u.avatar_url, wm.role, wm.joined_at").
-		Offset(offset).Limit(limit).
-		Order("wm.joined_at ASC").
-		Scan(&members).Error; err != nil {
+
+	q := query.Select("wm.user_id, u.full_name, u.username, u.email, u.avatar_url, wm.role, wm.joined_at").
+		Offset(offset).Limit(limit)
+
+	switch {
+	case search != "" && role == "":
+		like := "%" + search + "%"
+		q = q.Order(gorm.Expr("CASE WHEN u.full_name ILIKE ? THEN 0 ELSE 1 END ASC, wm.joined_at ASC", like))
+	case role != "":
+		q = q.Order("wm.joined_at ASC")
+	default:
+		q = q.Order("CASE wm.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 WHEN 'MEMBER' THEN 2 END ASC, wm.joined_at ASC")
+	}
+
+	if err := q.Scan(&members).Error; err != nil {
 		return nil, nil, err
 	}
 

@@ -53,7 +53,6 @@ func (m *Middleware) RequireAnyWorkspaceAdminRole() gin.HandlerFunc {
 
 func (m *Middleware) RequireWorkspaceRole(requiredRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. Lấy workspace_id từ URL param
 		workspaceID := c.Param("workspace_id")
 		if workspaceID == "" {
 			appresponse.Fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "workspace_id is required")
@@ -61,7 +60,6 @@ func (m *Middleware) RequireWorkspaceRole(requiredRoles ...string) gin.HandlerFu
 			return
 		}
 
-		// 2. Lấy user_id đã được AuthMiddleware set vào context
 		userIDVal, exists := c.Get(ContextKeyUserID)
 		if !exists {
 			appresponse.Fail(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
@@ -70,7 +68,17 @@ func (m *Middleware) RequireWorkspaceRole(requiredRoles ...string) gin.HandlerFu
 		}
 		userID := userIDVal.(string)
 
-		// 3. Query workspace_members table để lấy role của user trong workspace này
+		if _, err := m.workspaceRepo.GetByID(workspaceID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				appresponse.Fail(c, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "Workspace not found or has been deleted")
+				c.Abort()
+				return
+			}
+			appresponse.Fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			c.Abort()
+			return
+		}
+
 		member, err := m.workspaceMemberRepo.GetByID(workspaceID, userID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -83,14 +91,12 @@ func (m *Middleware) RequireWorkspaceRole(requiredRoles ...string) gin.HandlerFu
 			return
 		}
 
-		// 4. Nếu không yêu cầu role cụ thể → chỉ cần là member là đủ
 		if len(requiredRoles) == 0 {
 			c.Set("workspace_role", string(member.Role))
 			c.Next()
 			return
 		}
 
-		// 5. Kiểm tra role có nằm trong danh sách được phép không
 		userRole := string(member.Role)
 		for _, r := range requiredRoles {
 			if userRole == r {

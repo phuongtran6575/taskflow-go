@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -101,9 +102,8 @@ func (s *workspaceInviteService) CreateInvite(workspaceID string, userID string,
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to check member count")
 	}
-	limit := s.getMemberLimit(workspace.Plan)
-	if limit > 0 && memberCount >= limit {
-		return nil, apperror.ErrWorkspaceMemberLimitReached
+	if err := helper.CheckMemberLimit(workspace.Plan, memberCount); err != nil {
+		return nil, err
 	}
 
 	code, err := generateInviteCode()
@@ -185,9 +185,8 @@ func (s *workspaceInviteService) JoinWorkspaceByCode(code string, userID string)
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to check member count")
 	}
-	limit := s.getMemberLimit(workspace.Plan)
-	if limit > 0 && memberCount >= limit {
-		return nil, apperror.ErrWorkspaceMemberLimitReached
+	if err := helper.CheckMemberLimit(workspace.Plan, memberCount); err != nil {
+		return nil, err
 	}
 
 	role := invite.Role
@@ -259,17 +258,6 @@ func (s *workspaceInviteService) RevokeInvite(workspaceID string, userID string,
 		InviteID:  inviteID,
 		RevokedAt: time.Now(),
 	}, nil
-}
-
-func (s *workspaceInviteService) getMemberLimit(plan models.WorkspacePlan) int64 {
-	switch plan {
-	case models.WorkspacePlanFREE:
-		return 10
-	case models.WorkspacePlanPRO:
-		return 50
-	default:
-		return 0
-	}
 }
 
 func generateInviteCode() (string, error) {

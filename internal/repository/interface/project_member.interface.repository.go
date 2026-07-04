@@ -13,6 +13,7 @@ type ProjectMemberRepository interface {
 	UpdateRole(projectID, userID string, roleID string) error
 	ValidateMembersExist(projectID string, userIDs []string) ([]string, error)
 	Delete(projectID, userID string) error
+	DeleteByWorkspace(workspaceID, userID string) error
 	Update(member *models.ProjectMember) error
 
 	// HasPermission kiểm tra user có permission slug cụ thể trong project không.

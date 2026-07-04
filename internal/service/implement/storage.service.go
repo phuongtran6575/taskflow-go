@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -42,7 +43,7 @@ func (s *storageService) GetWorkspaceStorageUsage(workspaceID string, userID str
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get storage usage")
 	}
 
-	limitBytes := getPlanLimit(workspace.Plan)
+	limitBytes := helper.GetPlanLimits(workspace.Plan).MaxStorageBytes
 	usedBytes := int64(0)
 	for _, p := range usageResult.BreakdownByProject {
 		usedBytes += p.UsedBytes

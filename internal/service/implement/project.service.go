@@ -11,6 +11,7 @@ import (
 
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -71,15 +72,6 @@ func (s *projectService) isValidBackground(bg string) bool {
 	return strings.HasPrefix(bg, "http://") || strings.HasPrefix(bg, "https://")
 }
 
-func (s *projectService) getProjectLimit(plan models.WorkspacePlan) int {
-	switch plan {
-	case models.WorkspacePlanFREE:
-		return 5
-	default:
-		return -1
-	}
-}
-
 func (s *projectService) ListProjects(workspaceID string, userID string, isOwner bool, isArchived *bool, isFavorite *bool, search string, param dto.PaginationParam) ([]dto.ProjectSummary, *dto.Pagination, error) {
 	if isOwner {
 		return s.projectRepo.GetListWorkspaceProject(workspaceID, userID, isArchived, isFavorite, search, param)
@@ -111,9 +103,8 @@ func (s *projectService) CreateProject(workspaceID string, userID string, req *d
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to count projects")
 	}
-	limit := s.getProjectLimit(workspace.Plan)
-	if limit > 0 && len(existingProjects) >= limit {
-		return nil, apperror.ErrProjectLimitReached
+	if err := helper.CheckProjectLimit(workspace.Plan, len(existingProjects)); err != nil {
+		return nil, err
 	}
 
 	for _, p := range existingProjects {

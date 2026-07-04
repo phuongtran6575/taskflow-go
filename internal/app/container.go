@@ -3,6 +3,7 @@ package app
 import (
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/handler"
+	"TaskFlow-Go/internal/job"
 	"TaskFlow-Go/internal/middleware"
 	repoImpl "TaskFlow-Go/internal/repository/implement"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
@@ -119,9 +120,13 @@ func NewContainer(db *gorm.DB) *Container {
 	c.NotificationRepo = repoImpl.NewNotificationRepository(db)
 	c.ActivityLogRepo = repoImpl.NewActivityLogRepository(db)
 
+	// --- Initialize Background Job Dispatcher ---
+	dispatcher := job.NewDispatcher(db)
+
 	// --- Initialize Middleware Provider ---
 	c.Middleware = middleware.NewMiddleware(
 		c.WorkspaceMemberRepo,
+		c.WorkspaceRepo,
 		c.ProjectMemberRepo,
 	)
 
@@ -129,8 +134,8 @@ func NewContainer(db *gorm.DB) *Container {
 	c.AuthService = serviceImpl.NewAuthService(c.UserRepo)
 	c.UserService = serviceImpl.NewUserService(c.UserRepo)
 	c.SessionService = serviceImpl.NewSessionService(c.UserRepo)
-	c.WorkspaceService = serviceImpl.NewWorkspaceService(c.WorkspaceRepo)
-	c.WorkspaceMemberService = serviceImpl.NewWorkspaceMemberService(c.WorkspaceMemberRepo, c.WorkspaceRepo, c.UserRepo)
+	c.WorkspaceService = serviceImpl.NewWorkspaceService(c.WorkspaceRepo, dispatcher)
+	c.WorkspaceMemberService = serviceImpl.NewWorkspaceMemberService(c.WorkspaceMemberRepo, c.WorkspaceRepo, c.UserRepo, c.ProjectMemberRepo, tm, c.NotificationRepo, c.ActivityLogRepo)
 	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo)
 	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo)
 	c.RoleService = serviceImpl.NewRoleService(c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo)

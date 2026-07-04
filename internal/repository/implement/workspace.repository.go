@@ -11,7 +11,9 @@ import (
 
 type workspaceRepository struct{ db *gorm.DB }
 
-// CountWorkspaceByPlan implements [_interface.WorkspaceRepository].
+func (r *workspaceRepository) WithTx(tx *gorm.DB) _interface.WorkspaceRepository {
+	return &workspaceRepository{db: tx}
+}
 
 func NewWorkspaceRepository(db *gorm.DB) _interface.WorkspaceRepository {
 	return &workspaceRepository{db: db}
@@ -28,6 +30,7 @@ func (r *workspaceRepository) CountWorkspaceByPlan(
 		Joins("JOIN workspace_members wm ON w.id = wm.workspace_id").
 		Select("w.plan, COUNT(*) AS count").
 		Where("w.plan IN ?", plans).
+		Where("w.deleted_at IS NULL").
 		Where("wm.user_id = ?", userID).
 		Where("wm.role = ?", role).
 		Group("w.plan").
@@ -42,7 +45,7 @@ func (r *workspaceRepository) CountWorkspaceByPlan(
 
 func (r *workspaceRepository) GetWorkspaceByDomain(domain string) (*models.Workspace, error) {
 	var workspace models.Workspace
-	err := r.db.Where("LOWER(domain) = LOWER(?)", domain).First(&workspace).Error
+	err := r.db.Where("LOWER(domain) = LOWER(?) AND deleted_at IS NULL", domain).First(&workspace).Error
 	return &workspace, err
 }
 
@@ -52,7 +55,7 @@ func (r *workspaceRepository) Create(workspace *models.Workspace) error {
 
 func (r *workspaceRepository) GetByID(id string) (*models.Workspace, error) {
 	var ws models.Workspace
-	err := r.db.Where("id = ?", id).First(&ws).Error
+	err := r.db.Where("id = ? AND deleted_at IS NULL", id).First(&ws).Error
 	return &ws, err
 }
 
@@ -61,7 +64,7 @@ func (r *workspaceRepository) Update(workspace *models.Workspace) error {
 }
 
 func (r *workspaceRepository) Delete(id string) error {
-	return r.db.Unscoped().Where("id = ?", id).Delete(&models.Workspace{}).Error
+	return r.db.Where("id = ?", id).Delete(&models.Workspace{}).Error
 }
 
 func (r *workspaceRepository) AddMember(member *models.WorkspaceMember) error {

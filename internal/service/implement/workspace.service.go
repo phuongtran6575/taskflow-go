@@ -3,12 +3,14 @@ package implement
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
+	"TaskFlow-Go/internal/job"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -18,10 +20,11 @@ import (
 
 type workspaceService struct {
 	workspaceRepo repoInterface.WorkspaceRepository
+	dispatcher    *job.Dispatcher
 }
 
-func NewWorkspaceService(workspaceRepo repoInterface.WorkspaceRepository) _interface.WorkspaceService {
-	return &workspaceService{workspaceRepo: workspaceRepo}
+func NewWorkspaceService(workspaceRepo repoInterface.WorkspaceRepository, dispatcher *job.Dispatcher) _interface.WorkspaceService {
+	return &workspaceService{workspaceRepo: workspaceRepo, dispatcher: dispatcher}
 }
 
 func (s *workspaceService) GetWorkspacesByUserId(userID string) (*dto.WorkspaceListResponse, error) {
@@ -106,6 +109,13 @@ func (s *workspaceService) GetWorkspaceById(workspaceID string, userID string) (
 		}
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to verify membership")
 	}
+
+	workspace.IsOverLimit = helper.IsWorkspaceOverLimit(
+		models.WorkspacePlan(workspace.Plan),
+		workspace.MemberCount,
+		workspace.ProjectCount,
+		0,
+	)
 
 	return workspace, nil
 }
@@ -244,13 +254,15 @@ func (s *workspaceService) DeleteWorkspace(workspaceID string, userID string, re
 		return nil, apperror.ErrForbidden
 	}
 
-	if req.ConfirmationName != workspace.Name {
+	if strings.TrimSpace(req.ConfirmationName) != strings.TrimSpace(workspace.Name) {
 		return nil, apperror.ErrInvalidConfirmation
 	}
 
 	if err := s.workspaceRepo.Delete(workspaceID); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to delete workspace")
 	}
+
+	s.dispatcher.CascadeSoftDeleteWorkspace(workspaceID)
 
 	return &dto.DeleteWorkspaceResponse{
 		Message: fmt.Sprintf("Workspace '%s' has been deleted successfully.", workspace.Name),

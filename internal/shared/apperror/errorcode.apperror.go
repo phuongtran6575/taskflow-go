@@ -156,6 +156,7 @@ var (
 
 	// Member limit
 	ErrWorkspaceMemberLimitReached = &AppError{Status: http.StatusTooManyRequests, Code: "WORKSPACE_MEMBER_LIMIT_REACHED", Message: "Workspace member limit reached"}
+	ErrCustomRolesNotAllowed      = &AppError{Status: http.StatusForbidden, Code: "CUSTOM_ROLES_NOT_ALLOWED", Message: "Custom roles are not available on your current plan"}
 
 	// Upload errors
 	ErrUploadFailed = &AppError{Status: http.StatusInternalServerError, Code: "UPLOAD_FAILED", Message: "File upload failed"}

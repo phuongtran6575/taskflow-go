@@ -1,11 +1,15 @@
 package _interface
 
 import (
+	"gorm.io/gorm"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 )
 
 type WorkspaceRepository interface {
+	WithTx(tx *gorm.DB) WorkspaceRepository
+
 	Create(workspace *models.Workspace) error
 	GetByID(id string) (*models.Workspace, error)
 	Update(workspace *models.Workspace) error

@@ -157,6 +157,11 @@ func (r *projectMemberRepository) Delete(projectID, userID string) error {
 		Delete(&models.ProjectMember{}).Error
 }
 
+func (r *projectMemberRepository) DeleteByWorkspace(workspaceID, userID string) error {
+	return r.db.Where("user_id = ? AND project_id IN (SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL)", userID, workspaceID).
+		Delete(&models.ProjectMember{}).Error
+}
+
 func (r *projectMemberRepository) HasPermission(projectID, userID, permissionSlug string) (bool, error) {
 	var count int64
 	err := r.db.Table("project_members pm").

@@ -1,11 +1,14 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
@@ -15,20 +18,32 @@ import (
 )
 
 type workspaceMemberService struct {
-	memberRepo    repoInterface.WorkspaceMemberRepository
-	workspaceRepo repoInterface.WorkspaceRepository
-	userRepo      repoInterface.UserRepository
+	memberRepo         repoInterface.WorkspaceMemberRepository
+	workspaceRepo      repoInterface.WorkspaceRepository
+	userRepo           repoInterface.UserRepository
+	projectMemberRepo  repoInterface.ProjectMemberRepository
+	tm                 *database.TransactionManager
+	notifRepo          repoInterface.NotificationRepository
+	activityLogRepo    repoInterface.ActivityLogRepository
 }
 
 func NewWorkspaceMemberService(
 	memberRepo repoInterface.WorkspaceMemberRepository,
 	workspaceRepo repoInterface.WorkspaceRepository,
 	userRepo repoInterface.UserRepository,
+	projectMemberRepo repoInterface.ProjectMemberRepository,
+	tm *database.TransactionManager,
+	notifRepo repoInterface.NotificationRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
 ) _interface.WorkspaceMemberService {
 	return &workspaceMemberService{
-		memberRepo:    memberRepo,
-		workspaceRepo: workspaceRepo,
-		userRepo:      userRepo,
+		memberRepo:        memberRepo,
+		workspaceRepo:     workspaceRepo,
+		userRepo:          userRepo,
+		projectMemberRepo: projectMemberRepo,
+		tm:                tm,
+		notifRepo:         notifRepo,
+		activityLogRepo:   activityLogRepo,
 	}
 }
 
@@ -169,11 +184,54 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 		}
 	}
 
-	if err := s.memberRepo.UpdateRole(workspaceID, userID, models.WorkspaceRoleADMIN); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update previous owner role")
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		memberTx := s.memberRepo.WithTx(tx)
+		wsTx := s.workspaceRepo.WithTx(tx)
+
+		if err := memberTx.UpdateRole(workspaceID, userID, models.WorkspaceRoleADMIN); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update previous owner role")
+		}
+		if err := memberTx.UpdateRole(workspaceID, req.NewOwnerID, models.WorkspaceRoleOWNER); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update new owner role")
+		}
+
+		workspace.OwnerID = req.NewOwnerID
+		if err := wsTx.Update(workspace); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update workspace owner")
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := s.memberRepo.UpdateRole(workspaceID, req.NewOwnerID, models.WorkspaceRoleOWNER); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update new owner role")
+
+	notifTitle := fmt.Sprintf("Bạn đã được chuyển quyền OWNER")
+	notifContent := fmt.Sprintf("Bạn đã được chuyển quyền OWNER của workspace %s.", workspace.Name)
+	notification := &models.Notification{
+		ActorID: &userID,
+		Type:    models.NotificationTypeANNOUNCEMENT,
+		Title:   notifTitle,
+		Content: &notifContent,
+	}
+	if err := s.notifRepo.Create(notification, []string{req.NewOwnerID}); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
+	}
+
+	metadata, _ := json.Marshal(map[string]string{
+		"old_owner_id": userID,
+		"new_owner_id": req.NewOwnerID,
+	})
+	metadataStr := string(metadata)
+	if err := s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &workspaceID,
+		UserID:      &userID,
+		Action:      models.ActivityActionUPDATE,
+		EntityType:  models.EntityTypeWORKSPACE,
+		EntityID:    workspaceID,
+		Metadata:    &metadataStr,
+	}); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to log activity")
 	}
 
 	return &dto.TransferOwnershipResponse{
@@ -223,8 +281,29 @@ func (s *workspaceMemberService) KickMember(workspaceID string, userID string, t
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get user projects")
 	}
 
+	workspace, err := s.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get workspace")
+	}
+
+	notifTitle := fmt.Sprintf("Bạn đã bị xóa khỏi workspace %s", workspace.Name)
+	notifContent := fmt.Sprintf("Bạn không còn là thành viên của %s.", workspace.Name)
+	notification := &models.Notification{
+		ActorID: &userID,
+		Type:    models.NotificationTypeANNOUNCEMENT,
+		Title:   notifTitle,
+		Content: &notifContent,
+	}
+	if err := s.notifRepo.Create(notification, []string{targetUserID}); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
+	}
+
 	if err := s.memberRepo.Delete(workspaceID, targetUserID); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to kick member")
+	}
+
+	if err := s.projectMemberRepo.DeleteByWorkspace(workspaceID, targetUserID); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to remove member from projects")
 	}
 
 	return &dto.KickMemberResponse{
@@ -252,6 +331,10 @@ func (s *workspaceMemberService) LeaveWorkspace(workspaceID string, userID strin
 
 	if err := s.memberRepo.Delete(workspaceID, userID); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to leave workspace")
+	}
+
+	if err := s.projectMemberRepo.DeleteByWorkspace(workspaceID, userID); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to remove from projects")
 	}
 
 	return &dto.LeaveWorkspaceResponse{

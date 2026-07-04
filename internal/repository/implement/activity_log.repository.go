@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/models"
 	_interface "TaskFlow-Go/internal/repository/interface"
 )
 
@@ -17,6 +18,10 @@ type activityLogRepository struct{ db *gorm.DB }
 
 func NewActivityLogRepository(db *gorm.DB) _interface.ActivityLogRepository {
 	return &activityLogRepository{db: db}
+}
+
+func (r *activityLogRepository) Create(log *models.ActivityLog) error {
+	return r.db.Create(log).Error
 }
 
 type activityLogRow struct {

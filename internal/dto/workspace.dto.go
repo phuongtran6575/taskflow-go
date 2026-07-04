@@ -58,6 +58,7 @@ type WorkspaceDetailResponse struct {
 	Owner        WorkspaceOwnerInfo `json:"owner"`
 	MemberCount  int                `json:"member_count"`
 	ProjectCount int                `json:"project_count"`
+	IsOverLimit  bool               `json:"is_over_limit"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
 }

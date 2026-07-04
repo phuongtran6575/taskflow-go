@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -153,9 +154,8 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 	for _, p := range storageUsage.BreakdownByProject {
 		usedBytes += p.UsedBytes
 	}
-	limitBytes := getPlanLimit(workspace.Plan)
-	if usedBytes >= limitBytes {
-		return nil, apperror.ErrStorageQuotaExceeded
+	if err := helper.CheckStorageLimit(workspace.Plan, usedBytes, 0); err != nil {
+		return nil, err
 	}
 
 	var uploaded []dto.UploadedFileInfo
@@ -182,7 +182,7 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 			continue
 		}
 
-		if usedBytes+totalSizeNew+fh.Size > limitBytes {
+		if err := helper.CheckStorageLimit(workspace.Plan, usedBytes, totalSizeNew+fh.Size); err != nil {
 			failed = append(failed, dto.FailedFile{
 				FileName: fh.Filename,
 				Reason:   "STORAGE_QUOTA_EXCEEDED",
@@ -408,15 +408,4 @@ func formatSizeDisplay(bytes int64) string {
 	return fmt.Sprintf("%.0f GB", float64(bytes)/(1024*1024*1024))
 }
 
-func getPlanLimit(plan models.WorkspacePlan) int64 {
-	switch plan {
-	case models.WorkspacePlanFREE:
-		return 1 * 1024 * 1024 * 1024
-	case models.WorkspacePlanPRO:
-		return 20 * 1024 * 1024 * 1024
-	case models.WorkspacePlanENTERPRISE:
-		return 100 * 1024 * 1024 * 1024
-	default:
-		return 1 * 1024 * 1024 * 1024
-	}
-}
+
