@@ -15,6 +15,7 @@ type ProjectMemberRepository interface {
 	Delete(projectID, userID string) error
 	DeleteByWorkspace(workspaceID, userID string) error
 	Update(member *models.ProjectMember) error
+	Create(member *models.ProjectMember) error
 
 	// HasPermission kiểm tra user có permission slug cụ thể trong project không.
 	// Query JOIN 3 bảng: project_members → role_permissions → permissions

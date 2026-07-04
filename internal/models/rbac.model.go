@@ -2,8 +2,6 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type Permission struct {
@@ -22,7 +20,6 @@ type Role struct {
 	Name        string    `gorm:"type:varchar(50);not null"`
 	Description *string   `gorm:"type:text"`
 	UpdatedAt   time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	DeletedAt   gorm.DeletedAt
 
 	Workspace   Workspace        `gorm:"foreignKey:WorkspaceID;constraint:OnDelete:CASCADE"`
 	Permissions []RolePermission `gorm:"foreignKey:RoleID;constraint:OnDelete:CASCADE"`

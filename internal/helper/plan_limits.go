@@ -13,6 +13,7 @@ const (
 type ResourceLimits struct {
 	MaxMembers               int64
 	MaxProjects              int64
+	MaxRoles                 int64
 	MaxStorageBytes          int64
 	AllowCustomRoles         bool
 	ActivityLogRetentionDays int
@@ -23,6 +24,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 	models.WorkspacePlanFREE: {
 		MaxMembers:               5,
 		MaxProjects:              3,
+		MaxRoles:                 3,
 		MaxStorageBytes:          _1GB,
 		AllowCustomRoles:         false,
 		ActivityLogRetentionDays: 7,
@@ -31,6 +33,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 	models.WorkspacePlanPRO: {
 		MaxMembers:               50,
 		MaxProjects:              -1,
+		MaxRoles:                 20,
 		MaxStorageBytes:          _20GB,
 		AllowCustomRoles:         true,
 		ActivityLogRetentionDays: 90,
@@ -39,6 +42,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 	models.WorkspacePlanENTERPRISE: {
 		MaxMembers:               -1,
 		MaxProjects:              -1,
+		MaxRoles:                 -1,
 		MaxStorageBytes:          -1,
 		AllowCustomRoles:         true,
 		ActivityLogRetentionDays: 365,
@@ -83,6 +87,17 @@ func CheckStorageLimit(plan models.WorkspacePlan, currentBytes int64, newBytes i
 	}
 	if currentBytes+newBytes > limits.MaxStorageBytes {
 		return apperror.ErrStorageQuotaExceeded
+	}
+	return nil
+}
+
+func CheckRoleLimit(plan models.WorkspacePlan, currentCount int) error {
+	limits := GetPlanLimits(plan)
+	if limits.MaxRoles == -1 {
+		return nil
+	}
+	if int64(currentCount) >= limits.MaxRoles {
+		return apperror.ErrRoleLimitReached
 	}
 	return nil
 }

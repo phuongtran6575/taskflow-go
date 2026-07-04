@@ -20,6 +20,7 @@ const (
 	EntityTypeCOMMENT   EntityType = "COMMENT"
 	EntityTypeCOLUMN    EntityType = "COLUMN"
 	EntityTypeWORKSPACE EntityType = "WORKSPACE"
+	EntityTypeROLE      EntityType = "ROLE"
 )
 
 type ActivityLog struct {

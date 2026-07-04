@@ -144,6 +144,30 @@ func (s *projectService) CreateProject(workspaceID string, userID string, req *d
 			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create default columns")
 		}
 
+		// Thêm creator vào project member (BR-PERM-06)
+		wsMember, wsErr := s.workspaceRepo.GetMember(workspaceID, userID)
+		if wsErr != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get workspace member")
+		}
+		projectMember := &models.ProjectMember{
+			ProjectID: project.ID,
+			UserID:    userID,
+		}
+		if wsMember.Role == models.WorkspaceRoleMEMBER {
+			roles, err := s.roleRepo.ListByWorkspaceID(workspaceID)
+			if err == nil {
+				for _, r := range roles {
+					if r.Name == "Member" {
+						projectMember.RoleID = &r.ID
+						break
+					}
+				}
+			}
+		}
+		if err := tx.Create(projectMember).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to add creator to project")
+		}
+
 		projectResponse, err := projectRepo.GetCreateProjectResponse(project.ID)
 		if err != nil {
 			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project response")

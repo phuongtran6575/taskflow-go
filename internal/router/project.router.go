@@ -49,18 +49,18 @@ func (r *ProjectRouter) RegisterRoutes(api *gin.RouterGroup) {
 	{
 		columns.GET("/", r.mw.RequireProjectMember(), r.columnHandler.ListColumns)
 		columns.POST("/", r.mw.RequireProjectPermission(middleware.PermColumnCreate), r.columnHandler.CreateColumn)
-		columns.PATCH("/:column_id/title", r.mw.RequireProjectPermission(middleware.PermColumnEdit), r.columnHandler.UpdateColumnTitle)
-		columns.PATCH("/:column_id/position", r.mw.RequireProjectPermission(middleware.PermColumnEdit), r.columnHandler.UpdateColumnPosition)
+		columns.PATCH("/:column_id/title", r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnTitle)
+		columns.PATCH("/:column_id/position", r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnPosition)
 		columns.DELETE("/:column_id", r.mw.RequireProjectPermission(middleware.PermColumnDelete), r.columnHandler.DeleteColumn)
 	}
 
 	members := api.Group("/workspaces/:workspace_id/projects/:project_id/members", auth)
 	{
 		members.GET("/", r.mw.RequireProjectMember(), r.memberHandler.ListMembers)
-		members.GET("/available", r.mw.RequireProjectPermission(middleware.PermMemberView), r.memberHandler.GetAvailableWorkspaceMembers)
-		members.POST("/", r.mw.RequireProjectPermission(middleware.PermMemberAdd), r.memberHandler.AddMembers)
-		members.PATCH("/:user_id/role", r.mw.RequireProjectPermission(middleware.PermMemberEdit), r.memberHandler.UpdateMemberRole)
-		members.DELETE("/:user_id", r.mw.RequireProjectPermission(middleware.PermMemberRemove), r.memberHandler.RemoveMember)
+		members.GET("/available", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.GetAvailableWorkspaceMembers)
+		members.POST("/", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.AddMembers)
+		members.PATCH("/:user_id/role", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.UpdateMemberRole)
+		members.DELETE("/:user_id", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.RemoveMember)
 		members.DELETE("/me", r.mw.RequireProjectMember(), r.memberHandler.LeaveProject)
 	}
 }

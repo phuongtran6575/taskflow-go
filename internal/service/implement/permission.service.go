@@ -56,12 +56,12 @@ func (s *permissionService) ListGroupedPermissions(userID string) (*dto.Permissi
 
 func (s *permissionService) ListModules(userID string) (*dto.ModuleListResponse, error) {
 	moduleDescriptions := map[string]string{
-		"Task":       "Quản lý công việc trong project",
-		"Project":    "Cài đặt và quản lý dự án",
-		"Column":     "Quản lý cột trên Kanban board",
-		"Comment":    "Bình luận trong task",
-		"Label":      "Nhãn dán phân loại task",
-		"Attachment": "Tệp đính kèm trong task",
+		"task":       "Quản lý công việc trong project",
+		"project":    "Cài đặt và quản lý dự án",
+		"column":     "Quản lý cột trên Kanban board",
+		"comment":    "Bình luận trong task",
+		"label":      "Nhãn dán phân loại task",
+		"attachment": "Tệp đính kèm trong task",
 	}
 
 	modules, err := s.permRepo.ListModules(moduleDescriptions)

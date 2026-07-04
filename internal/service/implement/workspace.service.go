@@ -16,15 +16,29 @@ import (
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
 	"TaskFlow-Go/internal/validator"
+
+	"github.com/google/uuid"
 )
 
 type workspaceService struct {
-	workspaceRepo repoInterface.WorkspaceRepository
-	dispatcher    *job.Dispatcher
+	workspaceRepo      repoInterface.WorkspaceRepository
+	roleRepo           repoInterface.RoleRepository
+	rolePermissionRepo repoInterface.RolePermissionRepository
+	dispatcher         *job.Dispatcher
 }
 
-func NewWorkspaceService(workspaceRepo repoInterface.WorkspaceRepository, dispatcher *job.Dispatcher) _interface.WorkspaceService {
-	return &workspaceService{workspaceRepo: workspaceRepo, dispatcher: dispatcher}
+func NewWorkspaceService(
+	workspaceRepo repoInterface.WorkspaceRepository,
+	roleRepo repoInterface.RoleRepository,
+	rolePermissionRepo repoInterface.RolePermissionRepository,
+	dispatcher *job.Dispatcher,
+) _interface.WorkspaceService {
+	return &workspaceService{
+		workspaceRepo:      workspaceRepo,
+		roleRepo:           roleRepo,
+		rolePermissionRepo: rolePermissionRepo,
+		dispatcher:         dispatcher,
+	}
 }
 
 func (s *workspaceService) GetWorkspacesByUserId(userID string) (*dto.WorkspaceListResponse, error) {
@@ -82,6 +96,11 @@ func (s *workspaceService) CreateWorkspace(userID string, req *dto.CreateWorkspa
 		JoinedAt:    time.Now(),
 	}); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to add workspace owner")
+	}
+
+	// BR-ROLE-08: Seed default roles (Manager, Developer, Viewer)
+	if err := s.seedDefaultRoles(workspace.ID); err != nil {
+		return nil, err
 	}
 
 	return &dto.WorkspaceCreateResponse{
@@ -267,4 +286,66 @@ func (s *workspaceService) DeleteWorkspace(workspaceID string, userID string, re
 	return &dto.DeleteWorkspaceResponse{
 		Message: fmt.Sprintf("Workspace '%s' has been deleted successfully.", workspace.Name),
 	}, nil
+}
+
+// BR-ROLE-08: Seed 3 default roles when workspace is created
+func (s *workspaceService) seedDefaultRoles(workspaceID string) error {
+	type seedRole struct {
+		Name        string
+		Description string
+		Permissions []string
+	}
+
+	allPerms := []string{
+		"task:view", "task:create", "task:update", "task:delete", "task:assign", "task:move", "task:set_priority",
+		"project:view", "project:update", "project:delete", "project:manage_members", "project:archive",
+		"column:create", "column:update", "column:delete",
+		"comment:create", "comment:update_own", "comment:delete_own", "comment:delete_any",
+		"label:create", "label:update", "label:delete", "label:assign",
+		"attachment:upload", "attachment:delete_own", "attachment:delete_any",
+	}
+
+	roles := []seedRole{
+		{
+			Name:        "Manager",
+			Description: "Quản lý toàn diện project và thành viên",
+			Permissions: allPerms,
+		},
+		{
+			Name:        "Developer",
+			Description: "Thành viên thực thi, quản lý task và công việc",
+			Permissions: []string{
+				"task:view", "task:create", "task:update", "task:delete", "task:assign", "task:move", "task:set_priority",
+				"comment:create", "comment:update_own", "comment:delete_own",
+				"attachment:upload", "attachment:delete_own",
+				"label:assign",
+			},
+		},
+		{
+			Name:        "Viewer",
+			Description: "Chỉ xem nội dung, không chỉnh sửa",
+			Permissions: []string{
+				"task:view",
+				"comment:create", "comment:update_own", "comment:delete_own",
+			},
+		},
+	}
+
+	for _, r := range roles {
+		desc := r.Description
+		role := &models.Role{
+			ID:          uuid.New().String(),
+			WorkspaceID: workspaceID,
+			Name:        r.Name,
+			Description: &desc,
+		}
+		if _, err := s.roleRepo.Create(role); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to create default role: "+r.Name)
+		}
+		if err := s.rolePermissionRepo.BulkCreate(role.ID, r.Permissions); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to assign permissions to default role: "+r.Name)
+		}
+	}
+
+	return nil
 }

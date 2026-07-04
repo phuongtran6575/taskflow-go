@@ -12,6 +12,19 @@ func (e *AppError) Error() string {
 	return e.Message
 }
 
+// RoleInUseError carries affected projects info for ROLE_IN_USE response (BR-ROLE-03)
+type RoleInUseError struct {
+	*AppError
+	AffectedProjects     interface{} `json:"affected_projects"`
+	TotalAffectedMembers int         `json:"total_affected_members"`
+}
+
+// InvalidPermissionIDsError carries invalid IDs for INVALID_PERMISSION_IDS response (BR-ROLE-06)
+type InvalidPermissionIDsError struct {
+	*AppError
+	InvalidIDs []string `json:"invalid_ids"`
+}
+
 var (
 	// Auth errors
 	ErrInvalidCredentials  = &AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}

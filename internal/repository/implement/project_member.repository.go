@@ -152,6 +152,10 @@ func (r *projectMemberRepository) ValidateMembersExist(projectID string, userIDs
 	return invalidIDs, nil
 }
 
+func (r *projectMemberRepository) Create(member *models.ProjectMember) error {
+	return r.db.Create(member).Error
+}
+
 func (r *projectMemberRepository) Delete(projectID, userID string) error {
 	return r.db.Where("project_id = ? AND user_id = ?", projectID, userID).
 		Delete(&models.ProjectMember{}).Error

@@ -30,10 +30,44 @@ func (r *roleRepository) GetByID(id string) (*models.Role, error) {
 	return &role, err
 }
 
+func (r *roleRepository) CountByWorkspaceID(workspaceID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Role{}).Where("workspace_id = ?", workspaceID).Count(&count).Error
+	return count, err
+}
+
 func (r *roleRepository) ListByWorkspaceID(workspaceID string) ([]models.Role, error) {
 	var roles []models.Role
 	err := r.db.Where("workspace_id = ?", workspaceID).Find(&roles).Error
 	return roles, err
+}
+
+func (r *roleRepository) GetAffectedProjectsByRoleID(roleID string) ([]dto.AffectedProject, int, error) {
+	var results []struct {
+		ProjectID   string `gorm:"column:project_id"`
+		ProjectName string `gorm:"column:project_name"`
+		MemberCount int    `gorm:"column:member_count"`
+	}
+	err := r.db.Table("project_members pm").
+		Joins("JOIN projects p ON p.id = pm.project_id").
+		Where("pm.role_id = ?", roleID).
+		Select("p.id as project_id, p.name as project_name, COUNT(DISTINCT pm.user_id) as member_count").
+		Group("p.id, p.name").
+		Scan(&results).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	projects := make([]dto.AffectedProject, len(results))
+	total := 0
+	for i, r := range results {
+		projects[i] = dto.AffectedProject{
+			ProjectID:   r.ProjectID,
+			ProjectName: r.ProjectName,
+			MemberCount: r.MemberCount,
+		}
+		total += r.MemberCount
+	}
+	return projects, total, nil
 }
 
 func (r *roleRepository) Update(role *models.Role) error {

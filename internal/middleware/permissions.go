@@ -1,7 +1,7 @@
 package middleware
 
 // Permission slugs cho hệ thống RBAC.
-// Format: "<module>.<action>"
+// Format: "{module}:{action}" (xem BR-PERM-02)
 // Các slug này phải khớp với cột `slug` trong bảng `permissions`.
 //
 // Khi thêm permission mới:
@@ -11,56 +11,50 @@ package middleware
 
 // --- Task permissions ---
 const (
-	PermTaskView   = "task.view"
-	PermTaskCreate = "task.create"
-	PermTaskEdit   = "task.edit"
-	PermTaskDelete = "task.delete"
-	PermTaskAssign = "task.assign"
-	PermTaskMove   = "task.move"
-)
-
-// --- Column permissions ---
-const (
-	PermColumnView   = "column.view"
-	PermColumnCreate = "column.create"
-	PermColumnEdit   = "column.edit"
-	PermColumnDelete = "column.delete"
-)
-
-// --- Label permissions ---
-const (
-	PermLabelView   = "label.view"
-	PermLabelCreate = "label.create"
-	PermLabelEdit   = "label.edit"
-	PermLabelDelete = "label.delete"
-)
-
-// --- Attachment permissions ---
-const (
-	PermAttachmentView   = "attachment.view"
-	PermAttachmentUpload = "attachment.upload"
-	PermAttachmentDelete = "attachment.delete"
-)
-
-// --- Comment permissions ---
-const (
-	PermCommentView   = "comment.view"
-	PermCommentCreate = "comment.create"
-	PermCommentEdit   = "comment.edit"
-	PermCommentDelete = "comment.delete"
+	PermTaskView        = "task:view"
+	PermTaskCreate      = "task:create"
+	PermTaskUpdate      = "task:update"
+	PermTaskDelete      = "task:delete"
+	PermTaskAssign      = "task:assign"
+	PermTaskMove        = "task:move"
+	PermTaskSetPriority = "task:set_priority"
 )
 
 // --- Project permissions ---
 const (
-	PermProjectUpdate  = "project.update"
-	PermProjectArchive = "project.archive"
-	PermProjectDelete  = "project.delete"
+	PermProjectView          = "project:view"
+	PermProjectUpdate        = "project:update"
+	PermProjectDelete        = "project:delete"
+	PermProjectManageMembers = "project:manage_members"
+	PermProjectArchive       = "project:archive"
 )
 
-// --- Project member permissions ---
+// --- Column permissions ---
 const (
-	PermMemberView   = "member.view"
-	PermMemberAdd    = "member.add"
-	PermMemberEdit   = "member.edit"
-	PermMemberRemove = "member.remove"
+	PermColumnCreate = "column:create"
+	PermColumnUpdate = "column:update"
+	PermColumnDelete = "column:delete"
+)
+
+// --- Comment permissions ---
+const (
+	PermCommentCreate     = "comment:create"
+	PermCommentUpdateOwn  = "comment:update_own"
+	PermCommentDeleteOwn  = "comment:delete_own"
+	PermCommentDeleteAny  = "comment:delete_any"
+)
+
+// --- Label permissions ---
+const (
+	PermLabelCreate = "label:create"
+	PermLabelUpdate = "label:update"
+	PermLabelDelete = "label:delete"
+	PermLabelAssign = "label:assign"
+)
+
+// --- Attachment permissions ---
+const (
+	PermAttachmentUpload    = "attachment:upload"
+	PermAttachmentDeleteOwn = "attachment:delete_own"
+	PermAttachmentDeleteAny = "attachment:delete_any"
 )

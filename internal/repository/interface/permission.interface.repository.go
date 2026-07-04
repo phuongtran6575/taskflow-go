@@ -14,4 +14,5 @@ type PermissionRepository interface {
 	GetByModule(module string) (*dto.ModulePermissionsResponse, error)
 	GetListPermissions(permissionIDs []string) ([]dto.PermissionAssignedInfo, error)
 	GetListPermissionsByModule(permissionIDs []string) (map[string][]dto.PermissionInfo, *int, error)
+	ValidatePermissionIDs(ids []string) (foundIDs []string, invalidIDs []string, err error)
 }

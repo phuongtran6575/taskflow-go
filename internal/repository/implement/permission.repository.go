@@ -44,6 +44,24 @@ func (r *permissionRepository) GetListPermissionsByModule(permissionIDs []string
 	return listByModule, &count, nil
 }
 
+func (r *permissionRepository) ValidatePermissionIDs(ids []string) (foundIDs []string, invalidIDs []string, err error) {
+	var found []string
+	err = r.db.Table("permissions").Where("id IN ?", ids).Pluck("id", &found).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	foundSet := make(map[string]struct{}, len(found))
+	for _, id := range found {
+		foundSet[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := foundSet[id]; !ok {
+			invalidIDs = append(invalidIDs, id)
+		}
+	}
+	return found, invalidIDs, nil
+}
+
 func (r *permissionRepository) GetByID(id string) (*models.Permission, error) {
 	var p models.Permission
 	err := r.db.Where("id = ?", id).First(&p).Error

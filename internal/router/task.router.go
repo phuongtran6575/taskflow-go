@@ -55,7 +55,7 @@ func (r *TaskRouter) RegisterRoutes(api *gin.RouterGroup) {
 		tasks.GET("/search", r.mw.RequireProjectPermission(middleware.PermTaskView), r.handler.SearchTasks)
 		tasks.POST("/", r.mw.RequireProjectPermission(middleware.PermTaskCreate), r.handler.CreateTask)
 		tasks.GET("/:task_id", r.mw.RequireProjectPermission(middleware.PermTaskView), r.handler.GetTaskDetails)
-		tasks.PATCH("/:task_id", r.mw.RequireProjectPermission(middleware.PermTaskEdit), r.handler.UpdateTask)
+		tasks.PATCH("/:task_id", r.mw.RequireProjectPermission(middleware.PermTaskUpdate), r.handler.UpdateTask)
 		tasks.DELETE("/:task_id", r.mw.RequireProjectPermission(middleware.PermTaskDelete), r.handler.DeleteTask)
 		tasks.POST("/:task_id/subtasks", r.mw.RequireProjectPermission(middleware.PermTaskCreate), r.handler.CreateSubtask)
 		tasks.GET("/:task_id/subtasks", r.mw.RequireProjectPermission(middleware.PermTaskView), r.handler.ListSubtasks)
@@ -76,38 +76,38 @@ func (r *TaskRouter) RegisterRoutes(api *gin.RouterGroup) {
 	// --- Labels ---
 	labels := api.Group("/workspaces/:workspace_id/projects/:project_id/labels", auth)
 	{
-		labels.GET("/", r.mw.RequireProjectPermission(middleware.PermLabelView), r.labelHandler.ListProjectLabels)
+		labels.GET("/", r.mw.RequireProjectMember(), r.labelHandler.ListProjectLabels)
 		labels.POST("/", r.mw.RequireProjectPermission(middleware.PermLabelCreate), r.labelHandler.CreateLabel)
-		labels.PATCH("/:label_id", r.mw.RequireProjectPermission(middleware.PermLabelEdit), r.labelHandler.UpdateLabel)
+		labels.PATCH("/:label_id", r.mw.RequireProjectPermission(middleware.PermLabelUpdate), r.labelHandler.UpdateLabel)
 		labels.DELETE("/:label_id", r.mw.RequireProjectPermission(middleware.PermLabelDelete), r.labelHandler.DeleteLabel)
 	}
 
 	// --- Task Labels ---
 	taskLabels := api.Group("/workspaces/:workspace_id/projects/:project_id/tasks/:task_id/labels", auth)
 	{
-		taskLabels.GET("/", r.mw.RequireProjectPermission(middleware.PermLabelView), r.labelHandler.ListTaskLabels)
-		taskLabels.POST("/", r.mw.RequireProjectPermission(middleware.PermLabelEdit), r.labelHandler.AssignLabels)
-		taskLabels.DELETE("/", r.mw.RequireProjectPermission(middleware.PermLabelEdit), r.labelHandler.RemoveLabels)
+		taskLabels.GET("/", r.mw.RequireProjectMember(), r.labelHandler.ListTaskLabels)
+		taskLabels.POST("/", r.mw.RequireProjectPermission(middleware.PermLabelAssign), r.labelHandler.AssignLabels)
+		taskLabels.DELETE("/", r.mw.RequireProjectPermission(middleware.PermLabelAssign), r.labelHandler.RemoveLabels)
 	}
 
 	// --- Attachments ---
 	attachments := api.Group("/workspaces/:workspace_id/projects/:project_id/tasks/:task_id/attachments", auth)
 	{
-		attachments.GET("/", r.mw.RequireProjectPermission(middleware.PermAttachmentView), r.attachmentHandler.ListAttachments)
+		attachments.GET("/", r.mw.RequireProjectMember(), r.attachmentHandler.ListAttachments)
 		attachments.POST("/", r.mw.RequireProjectPermission(middleware.PermAttachmentUpload), r.attachmentHandler.UploadAttachments)
-		attachments.GET("/:attachment_id/download", r.mw.RequireProjectPermission(middleware.PermAttachmentView), r.attachmentHandler.GetDownloadUrl)
-		attachments.GET("/:attachment_id/preview", r.mw.RequireProjectPermission(middleware.PermAttachmentView), r.attachmentHandler.GetPreviewUrl)
-		attachments.DELETE("/:attachment_id", r.mw.RequireProjectPermission(middleware.PermAttachmentDelete), r.attachmentHandler.DeleteAttachment)
+		attachments.GET("/:attachment_id/download", r.mw.RequireProjectMember(), r.attachmentHandler.GetDownloadUrl)
+		attachments.GET("/:attachment_id/preview", r.mw.RequireProjectMember(), r.attachmentHandler.GetPreviewUrl)
+		attachments.DELETE("/:attachment_id", r.mw.RequireProjectPermission(middleware.PermAttachmentDeleteOwn, middleware.PermAttachmentDeleteAny), r.attachmentHandler.DeleteAttachment)
 	}
 
 	// --- Comments ---
 	comments := api.Group("/workspaces/:workspace_id/projects/:project_id/tasks/:task_id/comments", auth)
 	{
-		comments.GET("/", r.mw.RequireProjectPermission(middleware.PermCommentView), r.commentHandler.ListComments)
+		comments.GET("/", r.mw.RequireProjectMember(), r.commentHandler.ListComments)
 		comments.POST("/", r.mw.RequireProjectPermission(middleware.PermCommentCreate), r.commentHandler.CreateComment)
-		comments.PATCH("/:comment_id", r.mw.RequireProjectPermission(middleware.PermCommentEdit), r.commentHandler.UpdateComment)
-		comments.DELETE("/:comment_id", r.mw.RequireProjectPermission(middleware.PermCommentDelete), r.commentHandler.DeleteComment)
-		comments.GET("/mentionable", r.mw.RequireProjectPermission(middleware.PermCommentView), r.commentHandler.GetMentionableUsers)
+		comments.PATCH("/:comment_id", r.mw.RequireProjectPermission(middleware.PermCommentUpdateOwn), r.commentHandler.UpdateComment)
+		comments.DELETE("/:comment_id", r.mw.RequireProjectPermission(middleware.PermCommentDeleteOwn, middleware.PermCommentDeleteAny), r.commentHandler.DeleteComment)
+		comments.GET("/mentionable", r.mw.RequireProjectMember(), r.commentHandler.GetMentionableUsers)
 	}
 
 	// --- Workspace-level routes ---
