@@ -26,6 +26,7 @@ type CreateSubtaskRequest struct {
 	Priority    string     `json:"priority,omitempty"`
 	AssigneeIDs []string   `json:"assignee_ids,omitempty"`
 	DueDate     *time.Time `json:"due_date,omitempty"`
+	ColumnID    *string    `json:"column_id,omitempty"`
 }
 
 type ColumnRef struct {

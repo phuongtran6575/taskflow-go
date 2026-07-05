@@ -166,6 +166,14 @@ func (r *projectMemberRepository) DeleteByWorkspace(workspaceID, userID string) 
 		Delete(&models.ProjectMember{}).Error
 }
 
+func (r *projectMemberRepository) ListMemberIDs(projectID string) ([]string, error) {
+	var ids []string
+	err := r.db.Table("project_members").
+		Where("project_id = ?", projectID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
 func (r *projectMemberRepository) HasPermission(projectID, userID, permissionSlug string) (bool, error) {
 	var count int64
 	err := r.db.Table("project_members pm").

@@ -3,9 +3,13 @@ package _interface
 import (
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
+
+	"gorm.io/gorm"
 )
 
 type TaskRepository interface {
+	WithTx(tx *gorm.DB) TaskRepository
+
 	Create(task *models.Task) error
 	GetByID(id string) (*models.Task, error)
 	ListByColumnID(columnID string) ([]models.Task, error)
@@ -16,6 +20,8 @@ type TaskRepository interface {
 	CountByParentID(parentID string, count *int64) error
 	GetNextTaskNumber(projectID string) (int, error)
 	GetCreateTaskResponse(taskID string) (*dto.TaskCreateResponse, error)
+	GetMaxPositionInColumn(projectID, columnID string) (float64, error)
+	GetMaxPositionInParent(parentID string) (float64, error)
 
 	ListWithFilters(projectID string, filters map[string]interface{}, page int, limit int) ([]dto.TaskSummary, *dto.Pagination, error)
 	GetByIDWithDetail(taskID string) (*dto.TaskDetailResponse, error)
@@ -24,4 +30,8 @@ type TaskRepository interface {
 
 	GetBoardByProjectID(projectID string, filters map[string]interface{}, tasksPerColumn int) (*dto.BoardResponse, error)
 	LoadMoreTasksInColumn(columnID string, cursor string, limit int, filters map[string]interface{}) (*dto.LoadMoreTasksResponse, error)
+
+	CascadeDelete(taskID string) error
+	ListIDsByParentID(parentID string) ([]string, error)
+	ListOverdueIDs() ([]string, error)
 }

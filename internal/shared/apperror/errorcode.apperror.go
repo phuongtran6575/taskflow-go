@@ -37,6 +37,18 @@ type InvalidUserIDsError struct {
 	InvalidUserIDs []string `json:"invalid_user_ids"`
 }
 
+// InvalidAssigneeIDsError carries invalid assignee IDs for INVALID_ASSIGNEE_IDS response (BR-TASK-05)
+type InvalidAssigneeIDsError struct {
+	*AppError
+	InvalidIDs []string `json:"invalid_ids"`
+}
+
+// InvalidLabelIDsError carries invalid label IDs for INVALID_LABEL_IDS response (BR-TASK-05)
+type InvalidLabelIDsError struct {
+	*AppError
+	InvalidIDs []string `json:"invalid_ids"`
+}
+
 var (
 	// Auth errors
 	ErrInvalidCredentials  = &AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}

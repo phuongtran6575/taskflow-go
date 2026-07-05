@@ -107,7 +107,7 @@ func (r *columnRepository) ListByProjectIDWithCount(projectID string) ([]dto.Col
 	err := r.db.Table("columns c").
 		Select("c.id, c.title, c.position, c.is_done, c.created_at, c.updated_at, "+
 			"(SELECT COUNT(*) FROM tasks t WHERE t.column_id = c.id AND t.deleted_at IS NULL) as task_count").
-		Where("c.project_id = ?", projectID).
+		Where("c.project_id = ? AND c.deleted_at IS NULL", projectID).
 		Order("c.position ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -126,4 +126,69 @@ func (r *columnRepository) ListByProjectIDWithCount(projectID string) ([]dto.Col
 		}
 	}
 	return info, nil
+}
+
+// BR-COL-03
+func (r *columnRepository) GetByProjectIDAndPosition(projectID string, position float64) (*models.Column, error) {
+	var col models.Column
+	err := r.db.Where("project_id = ? AND position = ? AND deleted_at IS NULL", projectID, position).First(&col).Error
+	return &col, err
+}
+
+// BR-COL-04
+func (r *columnRepository) GetMinTaskPosition(columnID string) (float64, error) {
+	var result struct {
+		Min float64 `gorm:"column:min"`
+	}
+	err := r.db.Table("tasks").
+		Select("COALESCE(MIN(position), 0) as min").
+		Where("column_id = ? AND deleted_at IS NULL", columnID).
+		Scan(&result).Error
+	return result.Min, err
+}
+
+// BR-COL-04
+func (r *columnRepository) MoveTasksWithReposition(sourceColumnID, targetColumnID string, newBase float64) (int64, error) {
+	result := r.db.Exec(`
+		UPDATE tasks SET
+			column_id = ?,
+			position = ? + sub.rn,
+			updated_at = NOW()
+		FROM (
+			SELECT id, ROW_NUMBER() OVER (ORDER BY position ASC) - 1 AS rn
+			FROM tasks
+			WHERE column_id = ? AND deleted_at IS NULL
+		) sub
+		WHERE tasks.id = sub.id`,
+		targetColumnID, newBase, sourceColumnID)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// BR-COL-04
+func (r *columnRepository) SoftDeleteTasksByColumnID(columnID string) (int64, error) {
+	result := r.db.Model(&models.Task{}).
+		Where("column_id = ? AND deleted_at IS NULL", columnID).
+		Update("deleted_at", time.Now())
+	return result.RowsAffected, result.Error
+}
+
+// BR-COL-04
+func (r *columnRepository) SoftDeleteAttachmentsByColumnID(columnID string) error {
+	return r.db.Exec(`
+		UPDATE attachments SET deleted_at = NOW()
+		WHERE task_id IN (
+			SELECT id FROM tasks WHERE column_id = ? AND deleted_at IS NULL
+		) AND deleted_at IS NULL`, columnID).Error
+}
+
+// BR-COL-04
+func (r *columnRepository) SoftDeleteCommentsByColumnID(columnID string) error {
+	return r.db.Exec(`
+		UPDATE comments SET deleted_at = NOW()
+		WHERE task_id IN (
+			SELECT id FROM tasks WHERE column_id = ? AND deleted_at IS NULL
+		) AND deleted_at IS NULL`, columnID).Error
 }

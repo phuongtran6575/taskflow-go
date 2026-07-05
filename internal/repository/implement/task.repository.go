@@ -20,6 +20,10 @@ func NewTaskRepository(db *gorm.DB) _interface.TaskRepository {
 	return &taskRepository{db: db}
 }
 
+func (r *taskRepository) WithTx(tx *gorm.DB) _interface.TaskRepository {
+	return &taskRepository{db: tx}
+}
+
 func (r *taskRepository) Create(task *models.Task) error {
 	return r.db.Create(task).Error
 }
@@ -70,6 +74,72 @@ func (r *taskRepository) GetNextTaskNumber(projectID string) (int, error) {
 		Where("project_id = ? AND deleted_at IS NULL", projectID).
 		Scan(&maxNum).Error
 	return maxNum.Max, err
+}
+
+func (r *taskRepository) CascadeDelete(taskID string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var subtaskIDs []string
+		tx.Table("tasks").Where("parent_id = ?", taskID).Pluck("id", &subtaskIDs)
+
+		allIDs := append([]string{taskID}, subtaskIDs...)
+
+		if err := tx.Model(&models.Comment{}).
+			Where("task_id IN ?", allIDs).
+			Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&models.Attachment{}).
+			Where("task_id IN ?", allIDs).
+			Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("id IN ?", subtaskIDs).Delete(&models.Task{}).Error; err != nil {
+			return err
+		}
+
+		return tx.Where("id = ?", taskID).Delete(&models.Task{}).Error
+	})
+}
+
+func (r *taskRepository) ListIDsByParentID(parentID string) ([]string, error) {
+	var ids []string
+	err := r.db.Table("tasks").
+		Where("parent_id = ? AND deleted_at IS NULL", parentID).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+func (r *taskRepository) GetMaxPositionInColumn(projectID, columnID string) (float64, error) {
+	var result struct {
+		Max float64 `gorm:"column:max"`
+	}
+	err := r.db.Table("tasks").
+		Select("COALESCE(MAX(position), 0) as max").
+		Where("project_id = ? AND column_id = ? AND parent_id IS NULL AND deleted_at IS NULL", projectID, columnID).
+		Scan(&result).Error
+	return result.Max, err
+}
+
+func (r *taskRepository) GetMaxPositionInParent(parentID string) (float64, error) {
+	var result struct {
+		Max float64 `gorm:"column:max"`
+	}
+	err := r.db.Table("tasks").
+		Select("COALESCE(MAX(position), 0) as max").
+		Where("parent_id = ? AND deleted_at IS NULL", parentID).
+		Scan(&result).Error
+	return result.Max, err
+}
+
+func (r *taskRepository) ListOverdueIDs() ([]string, error) {
+	var ids []string
+	err := r.db.Table("tasks t").
+		Joins("JOIN columns c ON c.id = t.column_id").
+		Where("t.due_date < NOW() AND t.due_date IS NOT NULL AND c.is_done = false AND t.deleted_at IS NULL").
+		Pluck("t.id", &ids).Error
+	return ids, err
 }
 
 func (r *taskRepository) GetCreateTaskResponse(taskID string) (*dto.TaskCreateResponse, error) {

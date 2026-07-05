@@ -242,9 +242,16 @@ func (r *taskAssigneeRepository) ListMyTasks(userID string, workspaceID string, 
 	}
 
 	offset := (page - 1) * limit
-	orderClause := "t.created_at DESC"
-	if sortBy != "" && sortDir != "" {
+	var orderClause string
+	if sortBy == "br_default" || (sortBy == "" && sortDir == "") {
+		orderClause = `
+			CASE WHEN t.due_date < NOW() AND c.is_done = false THEN 0 ELSE 1 END ASC,
+			CASE WHEN t.due_date IS NOT NULL THEN t.due_date END ASC,
+			t.created_at DESC`
+	} else if sortBy != "" && sortDir != "" {
 		orderClause = "t." + sortBy + " " + sortDir
+	} else {
+		orderClause = "t.created_at DESC"
 	}
 
 	var rows []projection.MyTaskRow

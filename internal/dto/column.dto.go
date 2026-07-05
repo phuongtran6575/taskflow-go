@@ -54,11 +54,12 @@ type UpdateColumnTitleResponse struct {
 }
 
 type UpdateColumnPositionResponse struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Position  float64   `json:"position"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Rebalanced bool    `json:"rebalanced"`
+	ID         string       `json:"id"`
+	Title      string       `json:"title"`
+	Position   float64      `json:"position"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+	Rebalanced bool         `json:"rebalanced"`
+	AllColumns *[]ColumnInfo `json:"all_columns,omitempty"`
 }
 
 type ColumnDeleteResponse struct {

@@ -1,12 +1,15 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
@@ -15,16 +18,21 @@ import (
 )
 
 type taskService struct {
-	taskRepo           repoInterface.TaskRepository
-	taskAssigneeRepo   repoInterface.TaskAssigneeRepository
-	taskLabelRepo      repoInterface.TaskLabelRepository
-	projectRepo        repoInterface.ProjectRepository
-	columnRepo         repoInterface.ColumnRepository
-	projectMemberRepo  repoInterface.ProjectMemberRepository
-	labelRepo          repoInterface.LabelRepository
+	tm                *database.TransactionManager
+	taskRepo          repoInterface.TaskRepository
+	taskAssigneeRepo  repoInterface.TaskAssigneeRepository
+	taskLabelRepo     repoInterface.TaskLabelRepository
+	projectRepo       repoInterface.ProjectRepository
+	columnRepo        repoInterface.ColumnRepository
+	projectMemberRepo repoInterface.ProjectMemberRepository
+	labelRepo         repoInterface.LabelRepository
+	workspaceRepo     repoInterface.WorkspaceRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
+	notifRepo         repoInterface.NotificationRepository
 }
 
 func NewTaskService(
+	tm *database.TransactionManager,
 	taskRepo repoInterface.TaskRepository,
 	taskAssigneeRepo repoInterface.TaskAssigneeRepository,
 	taskLabelRepo repoInterface.TaskLabelRepository,
@@ -32,8 +40,12 @@ func NewTaskService(
 	columnRepo repoInterface.ColumnRepository,
 	projectMemberRepo repoInterface.ProjectMemberRepository,
 	labelRepo repoInterface.LabelRepository,
+	workspaceRepo repoInterface.WorkspaceRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
+	notifRepo repoInterface.NotificationRepository,
 ) _interface.TaskService {
 	return &taskService{
+		tm:                tm,
 		taskRepo:          taskRepo,
 		taskAssigneeRepo:  taskAssigneeRepo,
 		taskLabelRepo:     taskLabelRepo,
@@ -41,7 +53,196 @@ func NewTaskService(
 		columnRepo:        columnRepo,
 		projectMemberRepo: projectMemberRepo,
 		labelRepo:         labelRepo,
+		workspaceRepo:     workspaceRepo,
+		activityLogRepo:   activityLogRepo,
+		notifRepo:         notifRepo,
 	}
+}
+
+func (s *taskService) getProjectOrFail(workspaceID, projectID string) (*models.Project, error) {
+	project, err := s.projectRepo.GetByID(projectID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperror.ErrProjectNotFound
+		}
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project")
+	}
+	if project.DeletedAt.Valid {
+		return nil, apperror.ErrProjectNotFound
+	}
+	return project, nil
+}
+
+func (s *taskService) getWorkspaceOwner(workspaceID string) (string, error) {
+	ws, err := s.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", apperror.ErrWorkspaceNotFound
+		}
+		return "", apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get workspace")
+	}
+	return ws.OwnerID, nil
+}
+
+func (s *taskService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		s := string(b)
+		metaStr = &s
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &wsID,
+		ProjectID:   &projectID,
+		UserID:      &uID,
+		Action:      action,
+		EntityType:  models.EntityTypeTASK,
+		EntityID:    entityID,
+		Metadata:    metaStr,
+	})
+}
+
+func (s *taskService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
+	now := time.Now()
+	ref := &referenceURL
+	if referenceURL == "" {
+		ref = nil
+	}
+	contentPtr := &content
+	notification := &models.Notification{
+		ActorID:      &actorID,
+		Type:         notifType,
+		Title:        title,
+		Content:      contentPtr,
+		ReferenceURL: ref,
+		CreatedAt:    now,
+	}
+	_ = s.notifRepo.Create(notification, []string{recipientID})
+}
+
+func (s *taskService) dedupStrings(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item]; !ok {
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func (s *taskService) validateColumn(projectID, columnID string) error {
+	column, err := s.columnRepo.GetByID(columnID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperror.NewAppError(http.StatusBadRequest, "INVALID_COLUMN", "Column does not exist")
+		}
+		return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get column")
+	}
+	if column.ProjectID != projectID {
+		return apperror.ErrInvalidColumn
+	}
+	return nil
+}
+
+func (s *taskService) getMaxPosition(projectID, columnID string, parentID *string) (float64, error) {
+	if parentID != nil {
+		return s.taskRepo.GetMaxPositionInParent(*parentID)
+	}
+	return s.taskRepo.GetMaxPositionInColumn(projectID, columnID)
+}
+
+func (s *taskService) validateProjectNotArchived(projectID string) error {
+	project, err := s.projectRepo.GetByID(projectID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperror.ErrProjectNotFound
+		}
+		return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project")
+	}
+	if project.IsArchived {
+		return apperror.ErrProjectArchived
+	}
+	return nil
+}
+
+func (s *taskService) validatePriority(priority string) error {
+	if priority == "" {
+		return nil
+	}
+	switch models.TaskPriority(priority) {
+	case models.TaskPriorityLOW, models.TaskPriorityMED, models.TaskPriorityHIGH, models.TaskPriorityURGENT:
+		return nil
+	default:
+		return apperror.ErrInvalidPriority
+	}
+}
+
+func (s *taskService) validateAssignees(workspaceID, projectID string, assigneeIDs []string) ([]string, error) {
+	if len(assigneeIDs) == 0 {
+		return nil, nil
+	}
+	deduped := s.dedupStrings(assigneeIDs)
+
+	validIDs, err := s.projectMemberRepo.ListMemberIDs(projectID)
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate assignees")
+	}
+	validMap := make(map[string]struct{}, len(validIDs)+1)
+	for _, id := range validIDs {
+		validMap[id] = struct{}{}
+	}
+
+	wsOwnerID, err := s.getWorkspaceOwner(workspaceID)
+	if err == nil && wsOwnerID != "" {
+		validMap[wsOwnerID] = struct{}{}
+	}
+
+	var invalidIDs []string
+	for _, uid := range deduped {
+		if _, ok := validMap[uid]; !ok {
+			invalidIDs = append(invalidIDs, uid)
+		}
+	}
+	if len(invalidIDs) > 0 {
+		return nil, &apperror.InvalidAssigneeIDsError{
+			AppError:    apperror.NewAppError(http.StatusBadRequest, "INVALID_ASSIGNEE_IDS", "One or more assignees are not project members"),
+			InvalidIDs:  invalidIDs,
+		}
+	}
+	return deduped, nil
+}
+
+func (s *taskService) validateLabels(projectID string, labelIDs []string) ([]string, error) {
+	if len(labelIDs) == 0 {
+		return nil, nil
+	}
+	deduped := s.dedupStrings(labelIDs)
+
+	projectLabels, err := s.labelRepo.ListByProjectID(projectID)
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get labels")
+	}
+	valid := make(map[string]struct{}, len(projectLabels))
+	for _, l := range projectLabels {
+		valid[l.ID] = struct{}{}
+	}
+	var invalidIDs []string
+	for _, lid := range deduped {
+		if _, ok := valid[lid]; !ok {
+			invalidIDs = append(invalidIDs, lid)
+		}
+	}
+	if len(invalidIDs) > 0 {
+		return nil, &apperror.InvalidLabelIDsError{
+			AppError:   apperror.NewAppError(http.StatusBadRequest, "INVALID_LABEL_IDS", "One or more labels do not belong to this project"),
+			InvalidIDs: invalidIDs,
+		}
+	}
+	return deduped, nil
 }
 
 func (s *taskService) ListTasks(workspaceID string, userID string, projectID string, columnID string, priority string, assigneeID string, labelID string, dueDateFrom string, dueDateTo string, hasAssignee *bool, search string, page int, limit int) ([]dto.TaskSummary, *dto.Pagination, error) {
@@ -78,7 +279,7 @@ func (s *taskService) ListTasks(workspaceID string, userID string, projectID str
 
 	tasks, pagination, err := s.taskRepo.ListWithFilters(projectID, filters, page, limit)
 	if err != nil {
-		return nil, nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to list tasks")
+		return nil, nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list tasks")
 	}
 	if len(tasks) == 0 {
 		return tasks, pagination, nil
@@ -91,19 +292,27 @@ func (s *taskService) ListTasks(workspaceID string, userID string, projectID str
 
 	assigneeMap, err := s.taskAssigneeRepo.ListByTaskIDs(taskIDs)
 	if err != nil {
-		return nil, nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to load assignees")
+		return nil, nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to load assignees")
 	}
 
 	labelMap, err := s.taskLabelRepo.ListByTaskIDs(taskIDs)
 	if err != nil {
-		return nil, nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to load labels")
+		return nil, nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to load labels")
+	}
+
+	doneColumnIDs := make(map[string]bool)
+	cols, _ := s.columnRepo.ListByProjectID(projectID)
+	for _, c := range cols {
+		if c.IsDone {
+			doneColumnIDs[c.ID] = true
+		}
 	}
 
 	now := time.Now()
 	for i := range tasks {
 		tasks[i].Assignees = assigneeMap[tasks[i].ID]
 		tasks[i].Labels = labelMap[tasks[i].ID]
-		if tasks[i].DueDate != nil && tasks[i].DueDate.Before(now) {
+		if tasks[i].DueDate != nil && tasks[i].DueDate.Before(now) && !doneColumnIDs[tasks[i].Column.ID] {
 			tasks[i].IsOverdue = true
 		}
 	}
@@ -116,75 +325,30 @@ func (s *taskService) CreateTask(workspaceID string, userID string, projectID st
 		return nil, apperror.ErrValidation
 	}
 
-	project, err := s.projectRepo.GetByID(projectID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperror.ErrProjectNotFound
-		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get project")
-	}
-	if project.IsArchived {
-		return nil, apperror.ErrProjectArchived
+	if err := s.validateProjectNotArchived(projectID); err != nil {
+		return nil, err
 	}
 
-	column, err := s.columnRepo.GetByID(req.ColumnID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperror.NewAppError(400, "INVALID_COLUMN", "Column does not exist")
-		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get column")
-	}
-	if column.ProjectID != projectID {
-		return nil, apperror.ErrInvalidColumn
+	if err := s.validateColumn(projectID, req.ColumnID); err != nil {
+		return nil, err
 	}
 
-	if req.Priority != "" {
-		switch models.TaskPriority(req.Priority) {
-		case models.TaskPriorityLOW, models.TaskPriorityMED, models.TaskPriorityHIGH, models.TaskPriorityURGENT:
-		default:
-			return nil, apperror.ErrInvalidPriority
-		}
+	if err := s.validatePriority(req.Priority); err != nil {
+		return nil, err
 	}
 
 	if req.StartDate != nil && req.DueDate != nil && req.StartDate.After(*req.DueDate) {
 		return nil, apperror.ErrInvalidDateRange
 	}
 
-	if len(req.AssigneeIDs) > 0 {
-		invalidIDs, err := s.projectMemberRepo.ValidateMembersExist(projectID, req.AssigneeIDs)
-		if err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to validate assignees")
-		}
-		if len(invalidIDs) > 0 {
-			return nil, apperror.NewAppError(400, "INVALID_ASSIGNEE_IDS",
-				fmt.Sprintf("Users are not project members: %v", invalidIDs))
-		}
-	}
-
-	if len(req.LabelIDs) > 0 {
-		projectLabels, err := 	s.labelRepo.ListByProjectID(projectID)
-		if err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get labels")
-		}
-		valid := make(map[string]struct{}, len(projectLabels))
-		for _, l := range projectLabels {
-			valid[l.ID] = struct{}{}
-		}
-		var invalidIDs []string
-		for _, lid := range req.LabelIDs {
-			if _, ok := valid[lid]; !ok {
-				invalidIDs = append(invalidIDs, lid)
-			}
-		}
-		if len(invalidIDs) > 0 {
-			return nil, apperror.NewAppError(400, "INVALID_LABEL_IDS",
-				fmt.Sprintf("Labels do not belong to this project: %v", invalidIDs))
-		}
-	}
-
-	nextNum, err := s.taskRepo.GetNextTaskNumber(projectID)
+	validAssigneeIDs, err := s.validateAssignees(workspaceID, projectID, req.AssigneeIDs)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to generate task number")
+		return nil, err
+	}
+
+	validLabelIDs, err := s.validateLabels(projectID, req.LabelIDs)
+	if err != nil {
+		return nil, err
 	}
 
 	priority := models.TaskPriority(req.Priority)
@@ -192,45 +356,102 @@ func (s *taskService) CreateTask(workspaceID string, userID string, projectID st
 		priority = models.TaskPriorityMED
 	}
 
-	task := models.Task{
-		ProjectID:   projectID,
-		ColumnID:    req.ColumnID,
-		CreatorID:   &userID,
-		TaskNumber:  nextNum,
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    priority,
-		StartDate:   req.StartDate,
-		DueDate:     req.DueDate,
-		Position:    float64(nextNum * 1000),
-	}
-	if err := s.taskRepo.Create(&task); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to create task")
-	}
+	var task models.Task
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var project models.Project
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("id = ?", projectID).First(&project).Error; err != nil {
+			return err
+		}
+		nextNum := project.LastTaskNumber + 1
+		if err := tx.Model(&project).Update("last_task_number", nextNum).Error; err != nil {
+			return err
+		}
 
-	if len(req.LabelIDs) > 0 {
-		if err := s.taskLabelRepo.BulkTaskLabel(task.ID, req.LabelIDs); err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to assign labels")
+		maxPos, err := s.getMaxPosition(projectID, req.ColumnID, nil)
+		if err != nil {
+			return err
 		}
-	}
-	if len(req.AssigneeIDs) > 0 {
-		if err := s.taskAssigneeRepo.BulkTaskAssignee(task.ID, req.AssigneeIDs, userID); err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to assign members")
+		newPos := maxPos + 1000
+
+		task = models.Task{
+			ProjectID:   projectID,
+			ColumnID:    req.ColumnID,
+			CreatorID:   &userID,
+			TaskNumber:  nextNum,
+			Title:       req.Title,
+			Description: req.Description,
+			Priority:    priority,
+			StartDate:   req.StartDate,
+			DueDate:     req.DueDate,
+			Position:    newPos,
 		}
+		if err := tx.Create(&task).Error; err != nil {
+			return err
+		}
+
+		if len(validLabelIDs) > 0 {
+			var taskLabels []models.TaskLabel
+			for _, lid := range validLabelIDs {
+				taskLabels = append(taskLabels, models.TaskLabel{TaskID: task.ID, LabelID: lid})
+			}
+			if err := tx.Create(&taskLabels).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(validAssigneeIDs) > 0 {
+			var taskAssignees []models.TaskAssignee
+			for _, aid := range validAssigneeIDs {
+				taskAssignees = append(taskAssignees, models.TaskAssignee{
+					TaskID: task.ID, UserID: aid, AssignedByID: &userID,
+				})
+			}
+			if err := tx.Create(&taskAssignees).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create task")
 	}
 
 	resp, err := s.taskRepo.GetCreateTaskResponse(task.ID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get create response")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get create response")
 	}
 	resp.Assignees, err = s.taskAssigneeRepo.ListByTaskID(task.ID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get assignees")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
 	resp.Labels, err = s.taskLabelRepo.ListByTaskID(task.ID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get labels")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get labels")
 	}
+
+	s.logActivity(workspaceID, projectID, userID, task.ID, models.ActivityActionCREATE, map[string]interface{}{
+		"task_number": task.TaskNumber,
+		"title":       task.Title,
+		"column_id":   task.ColumnID,
+	})
+
+	for _, aid := range validAssigneeIDs {
+		if aid == userID {
+			continue
+		}
+		taskRef := fmt.Sprintf("%s-%d", resp.Column.Title, task.TaskNumber)
+		dueText := "Không có deadline"
+		if task.DueDate != nil {
+			dueText = task.DueDate.Format("2006-01-02 15:04")
+		}
+		s.sendNotification(aid, userID, models.NotificationTypeASSIGNED,
+			fmt.Sprintf("Bạn được giao task %s: %s", taskRef, task.Title),
+			fmt.Sprintf("Trong project %s bởi %s. Hạn: %s.", projectID, userID, dueText),
+			fmt.Sprintf("/tasks/%s", task.ID),
+		)
+	}
+
 	return resp, nil
 }
 
@@ -240,7 +461,7 @@ func (s *taskService) GetTaskById(workspaceID string, userID string, projectID s
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get task")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get task")
 	}
 	if task.Project.ID != projectID {
 		return nil, apperror.ErrTaskNotFound
@@ -248,11 +469,11 @@ func (s *taskService) GetTaskById(workspaceID string, userID string, projectID s
 
 	task.Assignees, err = s.taskAssigneeRepo.ListByTaskID(taskID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get assignees")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
 	task.Labels, err = s.taskLabelRepo.ListByTaskID(taskID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get labels")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get labels")
 	}
 	return task, nil
 }
@@ -263,7 +484,7 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get task")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get task")
 	}
 	if task.ProjectID != projectID {
 		return nil, apperror.ErrTaskNotFound
@@ -274,7 +495,7 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrProjectNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get project")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project")
 	}
 	if project.IsArchived {
 		return nil, apperror.ErrProjectArchived
@@ -284,7 +505,7 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 
 	if req.Title != nil {
 		if *req.Title == "" {
-			return nil, apperror.NewAppError(400, "VALIDATION_ERROR", "Title cannot be empty")
+			return nil, apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "Title cannot be empty")
 		}
 		if *req.Title != task.Title {
 			changes = append(changes, dto.FieldChange{Field: "title", OldValue: task.Title, NewValue: *req.Title})
@@ -293,17 +514,17 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 	}
 
 	if req.Description != nil {
-		if (task.Description == nil && *req.Description != "") || (task.Description != nil && *task.Description != *req.Description) {
-			changes = append(changes, dto.FieldChange{Field: "description", OldValue: task.Description, NewValue: *req.Description})
-		}
+		oldVal := task.Description
+		newVal := *req.Description
 		task.Description = req.Description
+		if (oldVal == nil && newVal != "") || (oldVal != nil && *oldVal != newVal) {
+			changes = append(changes, dto.FieldChange{Field: "description", OldValue: oldVal, NewValue: newVal})
+		}
 	}
 
 	if req.Priority != nil {
-		switch models.TaskPriority(*req.Priority) {
-		case models.TaskPriorityLOW, models.TaskPriorityMED, models.TaskPriorityHIGH, models.TaskPriorityURGENT:
-		default:
-			return nil, apperror.ErrInvalidPriority
+		if err := s.validatePriority(*req.Priority); err != nil {
+			return nil, err
 		}
 		if *req.Priority != string(task.Priority) {
 			changes = append(changes, dto.FieldChange{Field: "priority", OldValue: string(task.Priority), NewValue: *req.Priority})
@@ -341,13 +562,20 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 	}
 
 	if len(changes) == 0 {
-		return nil, apperror.NewAppError(400, "VALIDATION_ERROR", "No fields to update")
+		return nil, apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "No fields to update")
 	}
 
 	task.UpdatedAt = time.Now()
 	if err := s.taskRepo.Update(task); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update task")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update task")
 	}
+
+	changesCopy := make([]dto.FieldChange, len(changes))
+	copy(changesCopy, changes)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+		"action":  "UPDATE",
+		"changes": changesCopy,
+	})
 
 	return &dto.UpdateTaskResponse{
 		ID:          task.ID,
@@ -369,10 +597,14 @@ func (s *taskService) DeleteTask(workspaceID string, userID string, projectID st
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get task")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get task")
 	}
 	if task.ProjectID != projectID {
 		return nil, apperror.ErrTaskNotFound
+	}
+
+	if err := s.validateProjectNotArchived(projectID); err != nil {
+		return nil, err
 	}
 
 	project, err := s.projectRepo.GetByID(projectID)
@@ -380,31 +612,34 @@ func (s *taskService) DeleteTask(workspaceID string, userID string, projectID st
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrProjectNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get project")
-	}
-	if project.IsArchived {
-		return nil, apperror.ErrProjectArchived
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project")
 	}
 
-	var subtaskCount int64
-	if err := s.taskRepo.CountByParentID(taskID, &subtaskCount); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to count subtasks")
+	subtaskIDs, err := s.taskRepo.ListIDsByParentID(taskID)
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list subtasks")
 	}
 
-	if err := s.taskRepo.Delete(taskID); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to delete task")
+	if err := s.taskRepo.CascadeDelete(taskID); err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete task")
 	}
+
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, map[string]interface{}{
+		"task_number":    task.TaskNumber,
+		"title":          task.Title,
+		"subtask_count":  len(subtaskIDs),
+	})
 
 	return &dto.TaskDeleteResponse{
 		Message:              fmt.Sprintf("Task '%s-%d' has been deleted.", project.Key, task.TaskNumber),
 		DeletedTaskID:        taskID,
-		DeletedSubtasksCount: int(subtaskCount),
+		DeletedSubtasksCount: len(subtaskIDs),
 	}, nil
 }
 
 func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID string, taskID string, req *dto.CreateSubtaskRequest) (*dto.SubtaskCreateResponse, error) {
 	if req.Title == "" {
-		return nil, apperror.NewAppError(400, "VALIDATION_ERROR", "Title is required")
+		return nil, apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "Title is required")
 	}
 
 	parent, err := s.taskRepo.GetByID(taskID)
@@ -412,7 +647,7 @@ func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get parent task")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get parent task")
 	}
 	if parent.ProjectID != projectID {
 		return nil, apperror.ErrTaskNotFound
@@ -423,45 +658,31 @@ func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID
 
 	var subtaskCount int64
 	if err := s.taskRepo.CountByParentID(taskID, &subtaskCount); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to count subtasks")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to count subtasks")
 	}
 	if subtaskCount >= 100 {
 		return nil, apperror.ErrSubtaskLimitReached
 	}
 
-	project, err := s.projectRepo.GetByID(projectID)
+	if err := s.validateProjectNotArchived(projectID); err != nil {
+		return nil, err
+	}
+
+	if err := s.validatePriority(req.Priority); err != nil {
+		return nil, err
+	}
+
+	validAssigneeIDs, err := s.validateAssignees(workspaceID, projectID, req.AssigneeIDs)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperror.ErrProjectNotFound
-		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get project")
-	}
-	if project.IsArchived {
-		return nil, apperror.ErrProjectArchived
+		return nil, err
 	}
 
-	if req.Priority != "" {
-		switch models.TaskPriority(req.Priority) {
-		case models.TaskPriorityLOW, models.TaskPriorityMED, models.TaskPriorityHIGH, models.TaskPriorityURGENT:
-		default:
-			return nil, apperror.ErrInvalidPriority
+	targetColumnID := parent.ColumnID
+	if req.ColumnID != nil && *req.ColumnID != "" {
+		if err := s.validateColumn(projectID, *req.ColumnID); err != nil {
+			return nil, err
 		}
-	}
-
-	if len(req.AssigneeIDs) > 0 {
-		invalidIDs, err := s.projectMemberRepo.ValidateMembersExist(projectID, req.AssigneeIDs)
-		if err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to validate assignees")
-		}
-		if len(invalidIDs) > 0 {
-			return nil, apperror.NewAppError(400, "INVALID_ASSIGNEE_IDS",
-				fmt.Sprintf("Users are not project members: %v", invalidIDs))
-		}
-	}
-
-	nextNum, err := s.taskRepo.GetNextTaskNumber(projectID)
-	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to generate task number")
+		targetColumnID = *req.ColumnID
 	}
 
 	priority := models.TaskPriority(req.Priority)
@@ -469,36 +690,74 @@ func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID
 		priority = models.TaskPriorityMED
 	}
 
-	subtask := models.Task{
-		ProjectID:  projectID,
-		ColumnID:   parent.ColumnID,
-		CreatorID:  &userID,
-		ParentID:   &taskID,
-		TaskNumber: nextNum,
-		Title:      req.Title,
-		Priority:   priority,
-		DueDate:    req.DueDate,
-		Position:   float64(nextNum * 1000),
-	}
-	if err := s.taskRepo.Create(&subtask); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to create subtask")
-	}
-
-	if len(req.AssigneeIDs) > 0 {
-		if err := s.taskAssigneeRepo.BulkTaskAssignee(subtask.ID, req.AssigneeIDs, userID); err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to assign members")
+	var subtask models.Task
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var project models.Project
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("id = ?", projectID).First(&project).Error; err != nil {
+			return err
 		}
+		nextNum := project.LastTaskNumber + 1
+		if err := tx.Model(&project).Update("last_task_number", nextNum).Error; err != nil {
+			return err
+		}
+
+		maxPos, err := s.getMaxPosition(projectID, "", &taskID)
+		if err != nil {
+			return err
+		}
+		newPos := maxPos + 1000
+
+		subtask = models.Task{
+			ProjectID:  projectID,
+			ColumnID:   targetColumnID,
+			CreatorID:  &userID,
+			ParentID:   &taskID,
+			TaskNumber: nextNum,
+			Title:      req.Title,
+			Priority:   priority,
+			DueDate:    req.DueDate,
+			Position:   newPos,
+		}
+		if err := tx.Create(&subtask).Error; err != nil {
+			return err
+		}
+
+		if len(validAssigneeIDs) > 0 {
+			var taskAssignees []models.TaskAssignee
+			for _, aid := range validAssigneeIDs {
+				taskAssignees = append(taskAssignees, models.TaskAssignee{
+					TaskID: subtask.ID, UserID: aid, AssignedByID: &userID,
+				})
+			}
+			if err := tx.Create(&taskAssignees).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create subtask")
 	}
 
-	column, err := s.columnRepo.GetByID(parent.ColumnID)
+	column, err := s.columnRepo.GetByID(targetColumnID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get column")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get column")
 	}
+
+	project, _ := s.projectRepo.GetByID(projectID)
 
 	assignees, err := s.taskAssigneeRepo.ListByTaskID(subtask.ID)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get assignees")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
+
+	s.logActivity(workspaceID, projectID, userID, subtask.ID, models.ActivityActionCREATE, map[string]interface{}{
+		"task_number": subtask.TaskNumber,
+		"title":       subtask.Title,
+		"parent_id":   taskID,
+		"column_id":   subtask.ColumnID,
+	})
 
 	return &dto.SubtaskCreateResponse{
 		ID:         subtask.ID,
@@ -526,7 +785,7 @@ func (s *taskService) ListSubtasks(workspaceID string, userID string, projectID 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to list subtasks")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list subtasks")
 	}
 	if len(resp.Data) > 0 {
 		subtaskIDs := make([]string, len(resp.Data))
@@ -535,7 +794,7 @@ func (s *taskService) ListSubtasks(workspaceID string, userID string, projectID 
 		}
 		assigneeMap, err := s.taskAssigneeRepo.ListByTaskIDs(subtaskIDs)
 		if err != nil {
-			return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to load assignees")
+			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to load assignees")
 		}
 		for i := range resp.Data {
 			resp.Data[i].Assignees = assigneeMap[resp.Data[i].ID]
@@ -579,9 +838,13 @@ func (s *taskService) GetMyTasks(workspaceID string, userID string, priority str
 		filters["search"] = search
 	}
 
+	if sortBy == "" {
+		sortBy = "br_default"
+	}
+
 	tasks, _, pagination, err := s.taskAssigneeRepo.ListMyTasks(userID, workspaceID, filters, page, limit, sortBy, sortDir)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get my tasks")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get my tasks")
 	}
 
 	for i := range tasks {
@@ -631,7 +894,7 @@ func (s *taskService) SearchTasks(workspaceID string, userID string, projectID s
 
 	tasks, pagination, err := s.taskRepo.SearchWithFilters(projectID, filters, page, limit, sortBy, sortDir)
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to search tasks")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to search tasks")
 	}
 
 	filtersApplied := make(map[string]interface{})

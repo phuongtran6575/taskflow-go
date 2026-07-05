@@ -16,8 +16,9 @@ type Project struct {
 	Background   string         `gorm:"type:varchar(255);not null;default:#ffffff"`
 	IsArchived   bool           `gorm:"not null;default:false"`
 	ArchivedAt   *time.Time     `gorm:"type:timestamp"`
-	ArchivedByID *string        `gorm:"type:uuid"`
-	CreatedAt    time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	ArchivedByID   *string        `gorm:"type:uuid"`
+	LastTaskNumber int            `gorm:"type:int;not null;default:0"`
+	CreatedAt      time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt    time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 	DeletedAt    gorm.DeletedAt
 

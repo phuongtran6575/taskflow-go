@@ -21,6 +21,7 @@ type ProjectMemberRepository interface {
 	// Query JOIN 3 bảng: project_members → role_permissions → permissions
 	HasPermission(projectID, userID, permissionSlug string) (bool, error)
 	BulkAddMember(projectID string, users []dto.MemberRolePair) ([]models.ProjectMember, error)
+	ListMemberIDs(projectID string) ([]string, error)
 
 	ListWithPagination(projectID string, search string, roleID string, page int, limit int) ([]dto.ProjectMemberInfo, *dto.Pagination, error)
 	ListAvailableWorkspaceMembers(workspaceID string, projectID string, search string, page int, limit int) ([]dto.AvailableWorkspaceMember, *dto.Pagination, error)
