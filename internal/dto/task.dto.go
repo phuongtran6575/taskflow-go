@@ -224,8 +224,9 @@ type MyTaskSummary struct {
 }
 
 type MyTaskListResponse struct {
-	Data       []MyTaskInfo `json:"data"`
-	Pagination Pagination   `json:"pagination"`
+	Data       []MyTaskInfo  `json:"data"`
+	Pagination Pagination    `json:"pagination"`
+	Summary    *MyTaskSummary `json:"summary,omitempty"`
 }
 
 type TaskSearchResponse struct {

@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,6 +21,9 @@ type taskAssigneeService struct {
 	projectRepo       repoInterface.ProjectRepository
 	projectMemberRepo repoInterface.ProjectMemberRepository
 	assigneeRepo      repoInterface.TaskAssigneeRepository
+	workspaceRepo     repoInterface.WorkspaceRepository
+	notifRepo         repoInterface.NotificationRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
 }
 
 func NewTaskAssigneeService(
@@ -27,12 +31,18 @@ func NewTaskAssigneeService(
 	projectRepo repoInterface.ProjectRepository,
 	projectMemberRepo repoInterface.ProjectMemberRepository,
 	assigneeRepo repoInterface.TaskAssigneeRepository,
+	workspaceRepo repoInterface.WorkspaceRepository,
+	notifRepo repoInterface.NotificationRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
 ) _interface.TaskAssigneeService {
 	return &taskAssigneeService{
 		taskRepo:          taskRepo,
 		projectRepo:       projectRepo,
 		projectMemberRepo: projectMemberRepo,
 		assigneeRepo:      assigneeRepo,
+		workspaceRepo:     workspaceRepo,
+		notifRepo:         notifRepo,
+		activityLogRepo:   activityLogRepo,
 	}
 }
 
@@ -69,6 +79,67 @@ func (s *taskAssigneeService) getTaskOrFail(projectID, taskID string) (*models.T
 
 func (s *taskAssigneeService) getTaskRef(task *models.Task, project *models.Project) string {
 	return fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+}
+
+func (s *taskAssigneeService) getWorkspaceOwner(workspaceID string) (string, error) {
+	ws, err := s.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", apperror.ErrWorkspaceNotFound
+		}
+		return "", apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get workspace")
+	}
+	return ws.OwnerID, nil
+}
+
+func (s *taskAssigneeService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
+	now := time.Now()
+	ref := &referenceURL
+	if referenceURL == "" {
+		ref = nil
+	}
+	contentPtr := &content
+	notification := &models.Notification{
+		ActorID:      &actorID,
+		Type:         notifType,
+		Title:        title,
+		Content:      contentPtr,
+		ReferenceURL: ref,
+		CreatedAt:    now,
+	}
+	_ = s.notifRepo.Create(notification, []string{recipientID})
+}
+
+func (s *taskAssigneeService) dedupStrings(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item]; !ok {
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &wsID,
+		ProjectID:   &projectID,
+		UserID:      &uID,
+		Action:      action,
+		EntityType:  models.EntityTypeTASK,
+		EntityID:    entityID,
+		Metadata:    metaStr,
+	})
 }
 
 func (s *taskAssigneeService) ListAssignees(workspaceID string, userID string, projectID string, taskID string) (*dto.AssigneeListResponse, error) {
@@ -138,16 +209,37 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 		return nil, err
 	}
 
-	invalidIDs, err := s.projectMemberRepo.ValidateMembersExist(projectID, req.UserIDs)
+	// BR-ASSIGN-02: Validate batch — dedup + check project_members OR workspace OWNER
+	deduped := s.dedupStrings(req.UserIDs)
+
+	validIDs, err := s.projectMemberRepo.ListMemberIDs(projectID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate members")
 	}
-	if len(invalidIDs) > 0 {
-		return nil, apperror.NewAppError(http.StatusBadRequest, "INVALID_USER_IDS",
-			fmt.Sprintf("Users are not project members: %v", invalidIDs))
+	validMap := make(map[string]struct{}, len(validIDs)+1)
+	for _, id := range validIDs {
+		validMap[id] = struct{}{}
 	}
 
-	existing, err := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+	wsOwnerID, err := s.getWorkspaceOwner(workspaceID)
+	if err == nil && wsOwnerID != "" {
+		validMap[wsOwnerID] = struct{}{}
+	}
+
+	var invalidIDs []string
+	for _, uid := range deduped {
+		if _, ok := validMap[uid]; !ok {
+			invalidIDs = append(invalidIDs, uid)
+		}
+	}
+	if len(invalidIDs) > 0 {
+		return nil, &apperror.InvalidUserIDsError{
+			AppError:       apperror.NewAppError(http.StatusBadRequest, "INVALID_USER_IDS", "One or more users are not project members or workspace owners"),
+			InvalidUserIDs: invalidIDs,
+		}
+	}
+
+	existing, err := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
@@ -156,13 +248,27 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 		existingSet[a.UserID] = struct{}{}
 	}
 
-	if len(existing)+len(req.UserIDs) > 20 {
-		return nil, apperror.ErrAssigneeLimitReached
+	// BR-ASSIGN-03: Giới hạn 20 — all-or-nothing
+	var toAdd []string
+	for _, uid := range deduped {
+		if _, ok := existingSet[uid]; !ok {
+			toAdd = append(toAdd, uid)
+		}
+	}
+	currentCount := len(existing)
+	if currentCount+len(toAdd) > 20 {
+		return nil, &apperror.AssigneeLimitError{
+			AppError: apperror.NewAppError(http.StatusBadRequest, "ASSIGNEE_LIMIT_REACHED",
+				fmt.Sprintf("Maximum 20 assignees per task (current: %d, can add: %d)", currentCount, 20-currentCount)),
+			Current: currentCount,
+			Limit:   20,
+			CanAdd:  20 - currentCount,
+		}
 	}
 
 	var addedIDs []string
 	var skippedIDs []string
-	for _, uid := range req.UserIDs {
+	for _, uid := range deduped {
 		if _, ok := existingSet[uid]; ok {
 			skippedIDs = append(skippedIDs, uid)
 			continue
@@ -202,12 +308,40 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 		})
 	}
 
+	// BR-ASSIGN-05: Gửi notification riêng cho từng assignee mới (trừ self)
+	taskRef := s.getTaskRef(task, project)
+	dueText := "Không có deadline"
+	if task.DueDate != nil {
+		dueText = task.DueDate.Format("2006-01-02 15:04")
+	}
+	refURL := fmt.Sprintf("/workspaces/%s/projects/%s/tasks/%s", workspaceID, projectID, taskID)
+	for _, aid := range addedIDs {
+		if aid == userID {
+			continue
+		}
+		s.sendNotification(aid, userID, models.NotificationTypeASSIGNED,
+			fmt.Sprintf("Bạn được giao task %s: %s", taskRef, task.Title),
+			fmt.Sprintf("Trong project %s bởi %s. Hạn: %s.", project.Name, infoMap[aid].FullName, dueText),
+			refURL,
+		)
+	}
+
+	// BR-ASSIGN-06: Activity log
+	addedInfo := make([]dto.UserRef, 0, len(addedIDs))
+	for _, id := range addedIDs {
+		addedInfo = append(addedInfo, dto.UserRef{UserID: id, FullName: infoMap[id].FullName})
+	}
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":  "assignees_added",
+		"added":  addedInfo,
+	})
+
 	return &dto.AssignMembersResponse{
-		TaskID:               taskID,
-		TaskRef:              s.getTaskRef(task, project),
-		Added:                added,
+		TaskID:                 taskID,
+		TaskRef:                taskRef,
+		Added:                  added,
 		SkippedAlreadyAssigned: skippedIDs,
-		TotalAssigneesAfter:  len(all),
+		TotalAssigneesAfter:    len(all),
 	}, nil
 }
 
@@ -254,7 +388,13 @@ func (s *taskAssigneeService) UnassignMembersFromTask(workspaceID string, userID
 		removed = append(removed, dto.UserRef{UserID: uid, FullName: info.FullName})
 	}
 
-	remaining, _ := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+
+	// BR-ASSIGN-06: Activity log
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":   "assignees_removed",
+		"removed": removed,
+	})
 
 	return &dto.UnassignMembersResponse{
 		TaskID:              taskID,
@@ -281,7 +421,7 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 
 	existing, err := s.assigneeRepo.GetByID(taskID, userID)
 	if err == nil && existing != nil {
-		all, _ := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+		all, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 		return &dto.SelfAssignResponse{
 			TaskID:              taskID,
 			TaskRef:             s.getTaskRef(task, project),
@@ -290,12 +430,18 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 		}, nil
 	}
 
-	current, err := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+	current, err := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
 	if len(current) >= 20 {
-		return nil, apperror.ErrAssigneeLimitReached
+		return nil, &apperror.AssigneeLimitError{
+			AppError: apperror.NewAppError(http.StatusBadRequest, "ASSIGNEE_LIMIT_REACHED",
+				fmt.Sprintf("Maximum 20 assignees per task (current: %d, can add: %d)", len(current), 20-len(current))),
+			Current: len(current),
+			Limit:   20,
+			CanAdd:  20 - len(current),
+		}
 	}
 
 	assignee := models.TaskAssignee{
@@ -307,7 +453,14 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to self-assign")
 	}
 
-	all, _ := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+	// BR-ASSIGN-06: Activity log — self_assigned
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":     "self_assigned",
+		"user_id":   userID,
+		"full_name": "", // sẽ được enrich ở tầng đọc nếu cần
+	})
+
+	all, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
 	return &dto.SelfAssignResponse{
 		TaskID:              taskID,
@@ -334,7 +487,14 @@ func (s *taskAssigneeService) SelfUnassignFromTask(workspaceID string, userID st
 
 	_ = s.assigneeRepo.Delete(taskID, userID)
 
-	remaining, _ := 	s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
+	// BR-ASSIGN-06: Activity log — self_unassigned
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":     "self_unassigned",
+		"user_id":   userID,
+		"full_name": "",
+	})
+
+	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
 	return &dto.SelfUnassignResponse{
 		TaskID:              taskID,

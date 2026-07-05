@@ -60,6 +60,11 @@ func (h *TaskBoardHandler) GetBoardData(c *gin.Context) {
 		b, _ := strconv.ParseBool(v)
 		hasAssignee = &b
 	}
+	var hasLabel *bool
+	if v := c.Query("has_label"); v != "" {
+		b, _ := strconv.ParseBool(v)
+		hasLabel = &b
+	}
 	var overdue *bool
 	if v := c.Query("overdue"); v != "" {
 		b, _ := strconv.ParseBool(v)
@@ -71,7 +76,7 @@ func (h *TaskBoardHandler) GetBoardData(c *gin.Context) {
 		tasksPerColumn = 20
 	}
 
-	result, err := h.boardService.GetBoardData(workspaceID, userID, projectID, priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, overdue, search, tasksPerColumn)
+	result, err := h.boardService.GetBoardData(workspaceID, userID, projectID, priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, hasLabel, overdue, search, tasksPerColumn)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -132,13 +137,18 @@ func (h *TaskBoardHandler) LoadMoreTasksInColumn(c *gin.Context) {
 		b, _ := strconv.ParseBool(v)
 		hasAssignee = &b
 	}
+	var hasLabel *bool
+	if v := c.Query("has_label"); v != "" {
+		b, _ := strconv.ParseBool(v)
+		hasLabel = &b
+	}
 	var overdue *bool
 	if v := c.Query("overdue"); v != "" {
 		b, _ := strconv.ParseBool(v)
 		overdue = &b
 	}
 
-	result, err := h.boardService.LoadMoreTasksInColumn(workspaceID, userID, projectID, columnID, cursor, limit, priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, overdue, search)
+	result, err := h.boardService.LoadMoreTasksInColumn(workspaceID, userID, projectID, columnID, cursor, limit, priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, hasLabel, overdue, search)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

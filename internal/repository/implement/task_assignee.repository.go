@@ -97,8 +97,8 @@ func (r *taskAssigneeRepository) ListByTaskIDWithDetail(taskID string) ([]dto.As
 		FullName       string     `gorm:"column:full_name"`
 		Username       string     `gorm:"column:username"`
 		AvatarURL      *string    `gorm:"column:avatar_url"`
-		RoleID         string     `gorm:"column:role_id"`
-		RoleName       string     `gorm:"column:role_name"`
+		RoleID         *string    `gorm:"column:role_id"`
+		RoleName       *string    `gorm:"column:role_name"`
 		AssignedAt     time.Time  `gorm:"column:assigned_at"`
 		AssignedByID   *string    `gorm:"column:assigned_by_id"`
 		AssignedByName *string    `gorm:"column:assigned_by_name"`
@@ -113,8 +113,8 @@ func (r *taskAssigneeRepository) ListByTaskIDWithDetail(taskID string) ([]dto.As
 		`).
 		Joins("JOIN users u ON u.id = ta.user_id").
 		Joins("JOIN tasks t ON t.id = ta.task_id").
-		Joins("JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ta.user_id").
-		Joins("JOIN roles r ON r.id = pm.role_id").
+		Joins("LEFT JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ta.user_id").
+		Joins("LEFT JOIN roles r ON r.id = pm.role_id").
 		Joins("LEFT JOIN users ab ON ab.id = ta.assigned_by_id").
 		Where("ta.task_id = ?", taskID).
 		Scan(&rows).Error
@@ -123,16 +123,21 @@ func (r *taskAssigneeRepository) ListByTaskIDWithDetail(taskID string) ([]dto.As
 	}
 	result := make([]dto.AssigneeDetail, len(rows))
 	for i, row := range rows {
+		var roleRef *dto.RoleRef
+		if row.RoleID != nil {
+			name := ""
+			if row.RoleName != nil {
+				name = *row.RoleName
+			}
+			roleRef = &dto.RoleRef{ID: *row.RoleID, Name: name}
+		}
 		result[i] = dto.AssigneeDetail{
-			UserID:    row.UserID,
-			FullName:  row.FullName,
-			Username:  row.Username,
-			AvatarURL: row.AvatarURL,
-			ProjectRole: &dto.RoleRef{
-				ID:   row.RoleID,
-				Name: row.RoleName,
-			},
-			AssignedAt: row.AssignedAt.Format(time.RFC3339),
+			UserID:      row.UserID,
+			FullName:    row.FullName,
+			Username:    row.Username,
+			AvatarURL:   row.AvatarURL,
+			ProjectRole: roleRef,
+			AssignedAt:  row.AssignedAt.Format(time.RFC3339),
 		}
 		if row.AssignedByID != nil {
 			name := ""
@@ -203,8 +208,11 @@ func (r *taskAssigneeRepository) ListAvailableForTask(taskID string, projectID s
 }
 
 func (r *taskAssigneeRepository) ListMyTasks(userID string, workspaceID string, filters map[string]interface{}, page int, limit int, sortBy string, sortDir string) ([]dto.MyTaskInfo, *dto.MyTaskSummary, *dto.Pagination, error) {
+	baseJoins := "JOIN tasks t ON t.id = ta.task_id AND t.deleted_at IS NULL JOIN projects p ON p.id = t.project_id"
+
 	buildQuery := func(tx *gorm.DB) *gorm.DB {
-		q := tx.Where("ta.user_id = ? AND t.deleted_at IS NULL AND p.workspace_id = ?", userID, workspaceID)
+		q := tx.Where("ta.user_id = ? AND t.deleted_at IS NULL AND p.workspace_id = ?", userID, workspaceID).
+			Where("EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?)", userID)
 
 		if v, ok := filters["project_id"]; ok && v != "" {
 			q = q.Where("t.project_id = ?", v)
@@ -231,9 +239,7 @@ func (r *taskAssigneeRepository) ListMyTasks(userID string, workspaceID string, 
 		return q
 	}
 
-	baseQuery := r.db.Table("task_assignees ta").
-		Joins("JOIN tasks t ON t.id = ta.task_id AND t.deleted_at IS NULL").
-		Joins("JOIN projects p ON p.id = t.project_id")
+	baseQuery := r.db.Table("task_assignees ta").Joins(baseJoins)
 
 	var total int64
 	if err := buildQuery(baseQuery.Session(&gorm.Session{})).
@@ -241,13 +247,50 @@ func (r *taskAssigneeRepository) ListMyTasks(userID string, workspaceID string, 
 		return nil, nil, nil, err
 	}
 
+	// BR-ASSIGN-07: Summary block — tính trên toàn bộ my tasks (không bị filter ảnh hưởng)
+	summaryQuery := r.db.Table("task_assignees ta").
+		Select(`
+			COUNT(*) AS total,
+			COUNT(*) FILTER (WHERE t.due_date < NOW() AND c.is_done = false) AS overdue,
+			COUNT(*) FILTER (WHERE t.due_date::date = CURRENT_DATE) AS due_today,
+			COUNT(*) FILTER (WHERE t.due_date BETWEEN NOW() AND NOW() + INTERVAL '7 days') AS due_this_week,
+			COUNT(*) FILTER (WHERE t.due_date IS NULL) AS no_due_date
+		`).
+		Joins("JOIN tasks t ON t.id = ta.task_id AND t.deleted_at IS NULL").
+		Joins("JOIN projects p ON p.id = t.project_id").
+		Joins("JOIN columns c ON c.id = t.column_id").
+		Where("ta.user_id = ? AND p.workspace_id = ?", userID, workspaceID).
+		Where("EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?)", userID)
+
+	var summary dto.MyTaskSummary
+	if err := summaryQuery.Scan(&summary).Error; err != nil {
+		return nil, nil, nil, err
+	}
+
+	// BR-ASSIGN-07: Sort mặc định theo 5 nhóm
 	offset := (page - 1) * limit
 	var orderClause string
-	if sortBy == "br_default" || (sortBy == "" && sortDir == "") {
+	if sortBy == "br_default" || sortBy == "" {
 		orderClause = `
-			CASE WHEN t.due_date < NOW() AND c.is_done = false THEN 0 ELSE 1 END ASC,
-			CASE WHEN t.due_date IS NOT NULL THEN t.due_date END ASC,
-			t.created_at DESC`
+			CASE
+				WHEN t.due_date < NOW()                                           THEN 0
+				WHEN t.due_date::date = CURRENT_DATE                              THEN 1
+				WHEN t.due_date < NOW() + INTERVAL '7 days'                       THEN 2
+				WHEN t.due_date IS NOT NULL                                       THEN 3
+				ELSE 4
+			END ASC,
+			CASE
+				WHEN t.due_date::date = CURRENT_DATE THEN
+					CASE t.priority
+						WHEN 'URGENT' THEN 0
+						WHEN 'HIGH'   THEN 1
+						WHEN 'MED'    THEN 2
+						WHEN 'LOW'    THEN 3
+					END
+				ELSE 0
+			END ASC,
+			CASE WHEN t.due_date IS NOT NULL THEN t.due_date END ASC NULLS LAST,
+			CASE WHEN t.due_date IS NULL THEN t.created_at END DESC`
 	} else if sortBy != "" && sortDir != "" {
 		orderClause = "t." + sortBy + " " + sortDir
 	} else {
@@ -301,5 +344,5 @@ func (r *taskAssigneeRepository) ListMyTasks(userID string, workspaceID string, 
 		tasks[i] = t
 	}
 
-	return tasks, nil, dto.NewPagination(total, dto.PaginationParam{Page: page, Limit: limit}), nil
+	return tasks, &summary, dto.NewPagination(total, dto.PaginationParam{Page: page, Limit: limit}), nil
 }

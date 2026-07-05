@@ -17,6 +17,7 @@ type EntityType string
 const (
 	EntityTypeTASK      EntityType = "TASK"
 	EntityTypePROJECT   EntityType = "PROJECT"
+	EntityTypeLABEL     EntityType = "LABEL"
 	EntityTypeCOMMENT   EntityType = "COMMENT"
 	EntityTypeCOLUMN    EntityType = "COLUMN"
 	EntityTypeWORKSPACE EntityType = "WORKSPACE"

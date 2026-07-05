@@ -60,8 +60,13 @@ func (h *TaskHandler) ListTasks(c *gin.Context) {
 		b, _ := strconv.ParseBool(v)
 		hasAssignee = &b
 	}
+	var hasLabel *bool
+	if v := c.Query("has_label"); v != "" {
+		b, _ := strconv.ParseBool(v)
+		hasLabel = &b
+	}
 
-	result, pagination, err := h.taskService.ListTasks(workspaceID, userID, projectID, columnID, priority, assigneeID, labelID, dueDateFrom, dueDateTo, hasAssignee, search, param.Page, param.Limit)
+	result, pagination, err := h.taskService.ListTasks(workspaceID, userID, projectID, columnID, priority, assigneeID, labelID, dueDateFrom, dueDateTo, hasAssignee, hasLabel, search, param.Page, param.Limit)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -319,7 +324,7 @@ func (h *TaskHandler) GetMyTasks(c *gin.Context) {
 	dueDateFrom := c.Query("due_date_from")
 	dueDateTo := c.Query("due_date_to")
 	search := c.Query("search")
-	sortBy := c.DefaultQuery("sort_by", "due_date")
+	sortBy := c.DefaultQuery("sort_by", "br_default")
 	sortDir := c.DefaultQuery("sort_dir", "asc")
 
 	var overdue *bool
@@ -391,6 +396,11 @@ func (h *TaskHandler) SearchTasks(c *gin.Context) {
 		b, _ := strconv.ParseBool(v)
 		hasAssignee = &b
 	}
+	var hasLabel *bool
+	if v := c.Query("has_label"); v != "" {
+		b, _ := strconv.ParseBool(v)
+		hasLabel = &b
+	}
 	var overdue *bool
 	if v := c.Query("overdue"); v != "" {
 		b, _ := strconv.ParseBool(v)
@@ -398,7 +408,7 @@ func (h *TaskHandler) SearchTasks(c *gin.Context) {
 	}
 	includeSubtasks, _ := strconv.ParseBool(c.DefaultQuery("include_subtasks", "false"))
 
-	result, err := h.taskService.SearchTasks(workspaceID, userID, projectID, search, priority, assigneeID, labelID, creatorID, columnID, dueDateFrom, dueDateTo, hasAssignee, overdue, includeSubtasks, sortBy, sortDir, param.Page, param.Limit)
+	result, err := h.taskService.SearchTasks(workspaceID, userID, projectID, search, priority, assigneeID, labelID, creatorID, columnID, dueDateFrom, dueDateTo, hasAssignee, hasLabel, overdue, includeSubtasks, sortBy, sortDir, param.Page, param.Limit)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

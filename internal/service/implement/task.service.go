@@ -245,7 +245,7 @@ func (s *taskService) validateLabels(projectID string, labelIDs []string) ([]str
 	return deduped, nil
 }
 
-func (s *taskService) ListTasks(workspaceID string, userID string, projectID string, columnID string, priority string, assigneeID string, labelID string, dueDateFrom string, dueDateTo string, hasAssignee *bool, search string, page int, limit int) ([]dto.TaskSummary, *dto.Pagination, error) {
+func (s *taskService) ListTasks(workspaceID string, userID string, projectID string, columnID string, priority string, assigneeID string, labelID string, dueDateFrom string, dueDateTo string, hasAssignee *bool, hasLabel *bool, search string, page int, limit int) ([]dto.TaskSummary, *dto.Pagination, error) {
 	page = max(page, 1)
 	if limit <= 0 {
 		limit = 50
@@ -272,6 +272,9 @@ func (s *taskService) ListTasks(workspaceID string, userID string, projectID str
 	}
 	if hasAssignee != nil {
 		filters["has_assignee"] = *hasAssignee
+	}
+	if hasLabel != nil {
+		filters["has_label"] = *hasLabel
 	}
 	if search != "" {
 		filters["search"] = search
@@ -842,7 +845,7 @@ func (s *taskService) GetMyTasks(workspaceID string, userID string, priority str
 		sortBy = "br_default"
 	}
 
-	tasks, _, pagination, err := s.taskAssigneeRepo.ListMyTasks(userID, workspaceID, filters, page, limit, sortBy, sortDir)
+	tasks, summary, pagination, err := s.taskAssigneeRepo.ListMyTasks(userID, workspaceID, filters, page, limit, sortBy, sortDir)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get my tasks")
 	}
@@ -852,10 +855,10 @@ func (s *taskService) GetMyTasks(workspaceID string, userID string, priority str
 			tasks[i].IsOverdue = true
 		}
 	}
-	return &dto.MyTaskListResponse{Data: tasks, Pagination: *pagination}, nil
+	return &dto.MyTaskListResponse{Data: tasks, Pagination: *pagination, Summary: summary}, nil
 }
 
-func (s *taskService) SearchTasks(workspaceID string, userID string, projectID string, search string, priority string, assigneeID string, labelID string, creatorID string, columnID string, dueDateFrom string, dueDateTo string, hasAssignee *bool, overdue *bool, includeSubtasks bool, sortBy string, sortDir string, page int, limit int) (*dto.TaskSearchResponse, error) {
+func (s *taskService) SearchTasks(workspaceID string, userID string, projectID string, search string, priority string, assigneeID string, labelID string, creatorID string, columnID string, dueDateFrom string, dueDateTo string, hasAssignee *bool, hasLabel *bool, overdue *bool, includeSubtasks bool, sortBy string, sortDir string, page int, limit int) (*dto.TaskSearchResponse, error) {
 	filters := make(map[string]interface{})
 
 	if priority != "" {
@@ -881,6 +884,9 @@ func (s *taskService) SearchTasks(workspaceID string, userID string, projectID s
 	}
 	if hasAssignee != nil {
 		filters["has_assignee"] = *hasAssignee
+	}
+	if hasLabel != nil {
+		filters["has_label"] = *hasLabel
 	}
 	if overdue != nil {
 		filters["overdue"] = *overdue
@@ -924,6 +930,9 @@ func (s *taskService) SearchTasks(workspaceID string, userID string, projectID s
 	}
 	if hasAssignee != nil {
 		filtersApplied["has_assignee"] = *hasAssignee
+	}
+	if hasLabel != nil {
+		filtersApplied["has_label"] = *hasLabel
 	}
 	if overdue != nil {
 		filtersApplied["overdue"] = *overdue

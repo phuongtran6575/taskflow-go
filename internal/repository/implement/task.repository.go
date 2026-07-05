@@ -133,6 +133,55 @@ func (r *taskRepository) GetMaxPositionInParent(parentID string) (float64, error
 	return result.Max, err
 }
 
+func (r *taskRepository) ExistsInColumn(columnID string, position float64) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Task{}).
+		Where("column_id = ? AND position = ? AND deleted_at IS NULL", columnID, position).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (r *taskRepository) CountBetweenPositions(columnID string, prevPos, nextPos float64) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Task{}).
+		Where("column_id = ? AND position > ? AND position < ? AND deleted_at IS NULL", columnID, prevPos, nextPos).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *taskRepository) UpdatePositionAtomic(taskID string, columnID string, position float64, lastKnownUpdatedAt time.Time) (int64, error) {
+	result := r.db.Model(&models.Task{}).
+		Where("id = ? AND updated_at = ?", taskID, lastKnownUpdatedAt).
+		Updates(map[string]interface{}{
+			"column_id":  columnID,
+			"position":   position,
+			"updated_at": time.Now(),
+		})
+	return result.RowsAffected, result.Error
+}
+
+func (r *taskRepository) RebalanceColumn(columnID string) ([]dto.TaskPositionInfo, error) {
+	var tasks []models.Task
+	if err := r.db.Where("column_id = ? AND deleted_at IS NULL", columnID).
+		Order("position ASC, created_at DESC").
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	positions := make([]dto.TaskPositionInfo, len(tasks))
+	for i, t := range tasks {
+		newPos := float64((i + 1) * 1000)
+		positions[i] = dto.TaskPositionInfo{ID: t.ID, Position: newPos}
+		if t.Position != newPos {
+			if err := r.db.Model(&models.Task{}).
+				Where("id = ?", t.ID).
+				Update("position", newPos).Error; err != nil {
+				return nil, err
+			}
+		}
+	}
+	return positions, nil
+}
+
 func (r *taskRepository) ListOverdueIDs() ([]string, error) {
 	var ids []string
 	err := r.db.Table("tasks t").
@@ -224,6 +273,13 @@ func (r *taskRepository) ListWithFilters(projectID string, filters map[string]in
 				q = q.Where("EXISTS (SELECT 1 FROM task_assignees ta2 WHERE ta2.task_id = t.id)")
 			} else {
 				q = q.Where("NOT EXISTS (SELECT 1 FROM task_assignees ta2 WHERE ta2.task_id = t.id)")
+			}
+		}
+		if v, ok := filters["has_label"]; ok && v != nil {
+			if b, ok2 := v.(bool); ok2 && b {
+				q = q.Where("EXISTS (SELECT 1 FROM task_labels tl3 WHERE tl3.task_id = t.id)")
+			} else {
+				q = q.Where("NOT EXISTS (SELECT 1 FROM task_labels tl3 WHERE tl3.task_id = t.id)")
 			}
 		}
 		if v, ok := filters["search"]; ok && v != "" {
@@ -471,6 +527,13 @@ func (r *taskRepository) applyBoardFilters(q *gorm.DB, filters map[string]interf
 			q = q.Where("EXISTS (SELECT 1 FROM task_assignees ta2 WHERE ta2.task_id = t.id)")
 		} else {
 			q = q.Where("NOT EXISTS (SELECT 1 FROM task_assignees ta2 WHERE ta2.task_id = t.id)")
+		}
+	}
+	if v, ok := filters["has_label"]; ok && v != nil {
+		if b, ok2 := v.(bool); ok2 && b {
+			q = q.Where("EXISTS (SELECT 1 FROM task_labels tl2 WHERE tl2.task_id = t.id)")
+		} else {
+			q = q.Where("NOT EXISTS (SELECT 1 FROM task_labels tl2 WHERE tl2.task_id = t.id)")
 		}
 	}
 	if v, ok := filters["overdue"]; ok && v != nil {

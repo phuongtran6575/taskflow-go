@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 type BoardProjectInfo struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -61,18 +63,25 @@ type LoadMoreTasksResponse struct {
 }
 
 type MoveTaskRequest struct {
-	ColumnID        string   `json:"column_id" binding:"required"`
-	PreviousPosition *float64 `json:"previous_position"`
-	NextPosition    *float64 `json:"next_position"`
+	ColumnID           string     `json:"column_id" binding:"required"`
+	PreviousPosition   *float64   `json:"previous_position"`
+	NextPosition       *float64   `json:"next_position"`
+	LastKnownUpdatedAt *time.Time `json:"last_known_updated_at"`
+}
+
+type TaskPositionInfo struct {
+	ID       string  `json:"id"`
+	Position float64 `json:"position"`
 }
 
 type MoveTaskResponse struct {
-	ID                string  `json:"id"`
-	TaskRef           string  `json:"task_ref"`
-	ColumnID          string  `json:"column_id"`
-	Position          float64 `json:"position"`
-	PreviousColumnID  string  `json:"previous_column_id"`
-	MovedBetweenColumns bool  `json:"moved_between_columns"`
-	Rebalanced        bool    `json:"rebalanced"`
-	UpdatedAt         string  `json:"updated_at"`
+	ID                string              `json:"id"`
+	TaskRef           string              `json:"task_ref"`
+	ColumnID          string              `json:"column_id"`
+	Position          float64             `json:"position"`
+	PreviousColumnID  string              `json:"previous_column_id"`
+	MovedBetweenColumns bool              `json:"moved_between_columns"`
+	Rebalanced        bool                `json:"rebalanced"`
+	AllPositions      *[]TaskPositionInfo `json:"all_positions,omitempty"`
+	UpdatedAt         string              `json:"updated_at"`
 }

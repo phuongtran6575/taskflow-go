@@ -37,6 +37,22 @@ type InvalidUserIDsError struct {
 	InvalidUserIDs []string `json:"invalid_user_ids"`
 }
 
+// AssigneeLimitError carries limit info for ASSIGNEE_LIMIT_REACHED response (BR-ASSIGN-03)
+type AssigneeLimitError struct {
+	*AppError
+	Current int `json:"current"`
+	Limit   int `json:"limit"`
+	CanAdd  int `json:"can_add"`
+}
+
+// TaskLabelLimitError carries limit info for LABEL_LIMIT_REACHED response (BR-LABEL-02)
+type TaskLabelLimitError struct {
+	*AppError
+	Current int `json:"current"`
+	Limit   int `json:"limit"`
+	CanAdd  int `json:"can_add"`
+}
+
 // InvalidAssigneeIDsError carries invalid assignee IDs for INVALID_ASSIGNEE_IDS response (BR-TASK-05)
 type InvalidAssigneeIDsError struct {
 	*AppError

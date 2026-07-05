@@ -1,13 +1,16 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
@@ -16,24 +19,55 @@ import (
 )
 
 type labelService struct {
-	labelRepo     repoInterface.LabelRepository
-	taskLabelRepo repoInterface.TaskLabelRepository
-	projectRepo   repoInterface.ProjectRepository
-	taskRepo      repoInterface.TaskRepository
+	tm              *database.TransactionManager
+	labelRepo       repoInterface.LabelRepository
+	taskLabelRepo   repoInterface.TaskLabelRepository
+	projectRepo     repoInterface.ProjectRepository
+	taskRepo        repoInterface.TaskRepository
+	activityLogRepo repoInterface.ActivityLogRepository
 }
 
 func NewLabelService(
+	tm *database.TransactionManager,
 	labelRepo repoInterface.LabelRepository,
 	taskLabelRepo repoInterface.TaskLabelRepository,
 	projectRepo repoInterface.ProjectRepository,
 	taskRepo repoInterface.TaskRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
 ) _interface.LabelService {
 	return &labelService{
-		labelRepo:     labelRepo,
-		taskLabelRepo: taskLabelRepo,
-		projectRepo:   projectRepo,
-		taskRepo:      taskRepo,
+		tm:              tm,
+		labelRepo:       labelRepo,
+		taskLabelRepo:   taskLabelRepo,
+		projectRepo:     projectRepo,
+		taskRepo:        taskRepo,
+		activityLogRepo: activityLogRepo,
 	}
+}
+
+func normalizeColor(color string) string {
+	color = strings.ToUpper(color)
+	if len(color) == 4 {
+		color = "#" + string(color[1]) + string(color[1]) + string(color[2]) + string(color[2]) + string(color[3]) + string(color[3])
+	}
+	return color
+}
+
+func (s *labelService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+	metaJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return
+	}
+	metaStr := string(metaJSON)
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &workspaceID,
+		ProjectID:   &projectID,
+		UserID:      &userID,
+		Action:      action,
+		EntityType:  models.EntityTypePROJECT,
+		EntityID:    entityID,
+		Metadata:    &metaStr,
+	})
 }
 
 func (s *labelService) getProjectOrFail(workspaceID, projectID string) (*models.Project, error) {
@@ -85,9 +119,11 @@ func (s *labelService) ListProjectLabels(workspaceID string, userID string, proj
 }
 
 func (s *labelService) CreateLabel(workspaceID string, userID string, projectID string, req *dto.CreateLabelRequest) (*dto.LabelCreateResponse, error) {
-	if req.Name == "" || req.Color == "" {
+	name := strings.TrimSpace(req.Name)
+	if name == "" || req.Color == "" {
 		return nil, apperror.ErrValidation
 	}
+
 	if !hexColorRegex.MatchString(req.Color) {
 		return nil, apperror.ErrInvalidColor
 	}
@@ -100,7 +136,7 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrProjectArchived
 	}
 
-	exists, err := s.labelRepo.ExistsByNameInProject(projectID, req.Name, "")
+	exists, err := s.labelRepo.ExistsByNameInProject(projectID, name, "")
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check label name")
 	}
@@ -116,14 +152,21 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrLabelLimitReached
 	}
 
+	color := normalizeColor(req.Color)
 	label := models.Label{
-		Name:      req.Name,
-		Color:     req.Color,
+		Name:      name,
+		Color:     color,
 		ProjectID: projectID,
 	}
 	if err := s.labelRepo.Create(&label); err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create label")
 	}
+
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionCREATE, map[string]interface{}{
+		"event":       "label_created",
+		"label_name":  label.Name,
+		"label_color": label.Color,
+	})
 
 	return &dto.LabelCreateResponse{
 		ID:        label.ID,
@@ -135,7 +178,7 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 }
 
 func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID string, labelID string, req *dto.UpdateLabelRequest) (*dto.LabelUpdateResponse, error) {
-	if req.Name != nil && *req.Name == "" {
+	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return nil, apperror.ErrValidation
 	}
 	if req.Color != nil && !hexColorRegex.MatchString(*req.Color) {
@@ -161,18 +204,47 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrLabelNotFound
 	}
 
-	if req.Name != nil && *req.Name != label.Name {
-		exists, err := s.labelRepo.ExistsByNameInProject(projectID, *req.Name, labelID)
-		if err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check label name")
+	var changes []map[string]interface{}
+
+	if req.Name != nil {
+		newName := strings.TrimSpace(*req.Name)
+		if newName != label.Name {
+			exists, err := s.labelRepo.ExistsByNameInProject(projectID, newName, labelID)
+			if err != nil {
+				return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check label name")
+			}
+			if exists {
+				return nil, apperror.ErrLabelNameAlreadyExists
+			}
+			changes = append(changes, map[string]interface{}{
+				"field": "name",
+				"old":   label.Name,
+				"new":   newName,
+			})
+			label.Name = newName
 		}
-		if exists {
-			return nil, apperror.ErrLabelNameAlreadyExists
-		}
-		label.Name = *req.Name
 	}
 	if req.Color != nil {
-		label.Color = *req.Color
+		newColor := normalizeColor(*req.Color)
+		if newColor != label.Color {
+			changes = append(changes, map[string]interface{}{
+				"field": "color",
+				"old":   label.Color,
+				"new":   newColor,
+			})
+			label.Color = newColor
+		}
+	}
+
+	if len(changes) == 0 {
+		taskLabels, _ := s.taskLabelRepo.ListByLabelID(labelID)
+		return &dto.LabelUpdateResponse{
+			ID:        label.ID,
+			Name:      label.Name,
+			Color:     label.Color,
+			TaskCount: len(taskLabels),
+			UpdatedAt: label.UpdatedAt.Format(time.RFC3339),
+		}, nil
 	}
 
 	label.UpdatedAt = time.Now()
@@ -180,11 +252,14 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update label")
 	}
 
-	taskLabels, err := 	s.taskLabelRepo.ListByLabelID(labelID)
-	taskCount := 0
-	if err == nil {
-		taskCount = len(taskLabels)
-	}
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":      "label_updated",
+		"label_id":   labelID,
+		"changes":    changes,
+	})
+
+	taskLabels, _ := s.taskLabelRepo.ListByLabelID(labelID)
+	taskCount := len(taskLabels)
 
 	return &dto.LabelUpdateResponse{
 		ID:        label.ID,
@@ -215,20 +290,34 @@ func (s *labelService) DeleteLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrLabelNotFound
 	}
 
-	taskLabels, err := 	s.taskLabelRepo.ListByLabelID(labelID)
-	affectedCount := 0
-	if err == nil {
-		affectedCount = len(taskLabels)
-	}
+	var affectedCount int64
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.TaskLabel{}).Where("label_id = ?", labelID).Count(&count).Error; err != nil {
+			return err
+		}
+		affectedCount = count
 
-	if err := s.labelRepo.Delete(labelID); err != nil {
+		if err := tx.Delete(&models.Label{}, "id = ?", labelID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete label")
 	}
+
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionDELETE, map[string]interface{}{
+		"event":               "label_deleted",
+		"label_name":          label.Name,
+		"label_color":         label.Color,
+		"affected_tasks_count": affectedCount,
+	})
 
 	return &dto.LabelDeleteResponse{
 		Message:            fmt.Sprintf("Label '%s' has been deleted.", label.Name),
 		DeletedLabelID:     labelID,
-		AffectedTasksCount: affectedCount,
+		AffectedTasksCount: int(affectedCount),
 	}, nil
 }
 
@@ -271,7 +360,7 @@ func (s *labelService) AssignLabelsToTask(workspaceID string, userID string, pro
 		return nil, err
 	}
 
-	projectLabels, err := 	s.labelRepo.ListByProjectID(projectID)
+	projectLabels, err := s.labelRepo.ListByProjectID(projectID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project labels")
 	}
@@ -286,33 +375,57 @@ func (s *labelService) AssignLabelsToTask(workspaceID string, userID string, pro
 		}
 	}
 	if len(invalidIDs) > 0 {
-		return nil, apperror.NewAppError(http.StatusBadRequest, "INVALID_LABEL_IDS",
-			fmt.Sprintf("Labels do not belong to this project: %v", invalidIDs))
-	}
-
-	existingLabels, err := 	s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
-	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get existing labels")
-	}
-	existingSet := make(map[string]struct{}, len(existingLabels))
-	for _, tl := range existingLabels {
-		existingSet[tl.LabelID] = struct{}{}
-	}
-	if len(existingLabels)+len(req.LabelIDs) > 10 {
-		return nil, apperror.ErrTaskLabelLimitReached
+		return nil, &apperror.InvalidLabelIDsError{
+			AppError:    apperror.NewAppError(http.StatusBadRequest, "INVALID_LABEL_IDS", "One or more labels do not belong to this project"),
+			InvalidIDs: invalidIDs,
+		}
 	}
 
 	var addedIDs []string
 	var skippedIDs []string
-	for _, lid := range req.LabelIDs {
-		if _, ok := existingSet[lid]; ok {
-			skippedIDs = append(skippedIDs, lid)
-			continue
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var existingLabelIDs []string
+		tx.Model(&models.TaskLabel{}).Where("task_id = ?", taskID).Pluck("label_id", &existingLabelIDs)
+
+		existingSet := make(map[string]struct{}, len(existingLabelIDs))
+		for _, lid := range existingLabelIDs {
+			existingSet[lid] = struct{}{}
 		}
-		if err := s.labelRepo.AddToTask(taskID, lid); err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign label")
+
+		current := len(existingLabelIDs)
+		toAdd := 0
+		for _, lid := range req.LabelIDs {
+			if _, ok := existingSet[lid]; !ok {
+				toAdd++
+			}
 		}
-		addedIDs = append(addedIDs, lid)
+		if current+toAdd > 10 {
+			return &apperror.TaskLabelLimitError{
+				AppError: apperror.NewAppError(http.StatusBadRequest, "LABEL_LIMIT_REACHED", "Maximum 10 labels per task"),
+				Current:  current,
+				Limit:    10,
+				CanAdd:   10 - current,
+			}
+		}
+
+		for _, lid := range req.LabelIDs {
+			if _, ok := existingSet[lid]; ok {
+				skippedIDs = append(skippedIDs, lid)
+				continue
+			}
+			if err := tx.Create(&models.TaskLabel{TaskID: taskID, LabelID: lid}).Error; err != nil {
+				return err
+			}
+			addedIDs = append(addedIDs, lid)
+		}
+		return nil
+	})
+	if err != nil {
+		var taskLabelLimitErr *apperror.TaskLabelLimitError
+		if errors.As(err, &taskLabelLimitErr) {
+			return nil, taskLabelLimitErr
+		}
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign labels")
 	}
 
 	labelMap := make(map[string]models.Label, len(projectLabels))
@@ -328,15 +441,15 @@ func (s *labelService) AssignLabelsToTask(workspaceID string, userID string, pro
 		}
 	}
 
-	allAfter, _ := 	s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
+	allAfter, _ := s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
 	ref := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
 
 	return &dto.AssignLabelsResponse{
-		TaskID:               taskID,
-		TaskRef:              ref,
-		Added:                added,
+		TaskID:                taskID,
+		TaskRef:               ref,
+		Added:                 added,
 		SkippedAlreadyAssigned: skippedIDs,
-		TotalLabelsAfter:     len(allAfter),
+		TotalLabelsAfter:      len(allAfter),
 	}, nil
 }
 
@@ -358,7 +471,7 @@ func (s *labelService) RemoveLabelsFromTask(workspaceID string, userID string, p
 		return nil, err
 	}
 
-	existingLabels, err := 	s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
+	existingLabels, err := s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get existing labels")
 	}
@@ -367,7 +480,7 @@ func (s *labelService) RemoveLabelsFromTask(workspaceID string, userID string, p
 		existingSet[tl.LabelID] = struct{}{}
 	}
 
-	projectLabels, err := 	s.labelRepo.ListByProjectID(projectID)
+	projectLabels, err := s.labelRepo.ListByProjectID(projectID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project labels")
 	}
@@ -393,7 +506,7 @@ func (s *labelService) RemoveLabelsFromTask(workspaceID string, userID string, p
 		}
 	}
 
-	allAfter, _ := 	s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
+	allAfter, _ := s.taskLabelRepo.ListTaskLabelsByTaskID(taskID)
 	ref := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
 
 	return &dto.RemoveLabelsResponse{

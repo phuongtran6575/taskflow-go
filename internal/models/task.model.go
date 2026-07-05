@@ -91,13 +91,12 @@ type Comment struct {
 func (Comment) TableName() string { return "comments" }
 
 type Label struct {
-	ID        string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	ProjectID string         `gorm:"type:uuid;not null"`
-	Name      string         `gorm:"type:varchar(50);not null"`
-	Color     string         `gorm:"type:varchar(7);not null"`
-	CreatedAt time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	DeletedAt gorm.DeletedAt
+	ID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	ProjectID string    `gorm:"type:uuid;not null"`
+	Name      string    `gorm:"type:varchar(50);not null"`
+	Color     string    `gorm:"type:varchar(7);not null"`
+	CreatedAt time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 
 	Project    Project    `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
 	TaskLabels []TaskLabel `gorm:"foreignKey:LabelID;constraint:OnDelete:CASCADE"`

@@ -58,9 +58,10 @@ func (r *labelRepository) ListByProjectIDWithCount(projectID string, search stri
 	}
 
 	query := r.db.Table("labels l").
-		Select("l.id, l.name, l.color, COUNT(tl.task_id) as task_count").
+		Select("l.id, l.name, l.color, COUNT(t.id) as task_count").
 		Joins("LEFT JOIN task_labels tl ON tl.label_id = l.id").
-		Where("l.project_id = ? AND l.deleted_at IS NULL", projectID).
+		Joins("LEFT JOIN tasks t ON t.id = tl.task_id AND t.deleted_at IS NULL").
+		Where("l.project_id = ?", projectID).
 		Group("l.id, l.name, l.color")
 
 	if search != "" {
@@ -125,7 +126,7 @@ func (r *labelRepository) ListByTaskIDWithRef(taskID string) (*dto.TaskLabelList
 func (r *labelRepository) ExistsByNameInProject(projectID string, name string, excludeID string) (bool, error) {
 	var count int64
 	query := r.db.Model(&models.Label{}).
-		Where("project_id = ? AND name = ? AND deleted_at IS NULL", projectID, name)
+		Where("project_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?))", projectID, name)
 	if excludeID != "" {
 		query = query.Where("id != ?", excludeID)
 	}
@@ -136,7 +137,7 @@ func (r *labelRepository) ExistsByNameInProject(projectID string, name string, e
 func (r *labelRepository) CountByProjectID(projectID string) (int64, error) {
 	var count int64
 	err := r.db.Model(&models.Label{}).
-		Where("project_id = ? AND deleted_at IS NULL", projectID).
+		Where("project_id = ?", projectID).
 		Count(&count).Error
 	return count, err
 }

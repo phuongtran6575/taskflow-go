@@ -1,6 +1,8 @@
 package _interface
 
 import (
+	"time"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 
@@ -30,6 +32,19 @@ type TaskRepository interface {
 
 	GetBoardByProjectID(projectID string, filters map[string]interface{}, tasksPerColumn int) (*dto.BoardResponse, error)
 	LoadMoreTasksInColumn(columnID string, cursor string, limit int, filters map[string]interface{}) (*dto.LoadMoreTasksResponse, error)
+
+	// BR-BOARD-02: validate position context
+	ExistsInColumn(columnID string, position float64) (bool, error)
+
+	// BR-BOARD-02: count tasks between two positions in same column
+	CountBetweenPositions(columnID string, prevPos, nextPos float64) (int64, error)
+
+	// BR-BOARD-03: atomic conditional update for optimistic concurrency control
+	// Returns rows affected (0 = conflict)
+	UpdatePositionAtomic(taskID string, columnID string, position float64, lastKnownUpdatedAt time.Time) (int64, error)
+
+	// BR-BOARD-02: rebalance all tasks in a column, returns updated positions
+	RebalanceColumn(columnID string) ([]dto.TaskPositionInfo, error)
 
 	CascadeDelete(taskID string) error
 	ListIDsByParentID(parentID string) ([]string, error)

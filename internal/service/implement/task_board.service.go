@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
@@ -16,29 +18,41 @@ import (
 )
 
 type taskBoardService struct {
+	tm                *database.TransactionManager
 	taskRepo          repoInterface.TaskRepository
 	columnRepo        repoInterface.ColumnRepository
 	projectRepo       repoInterface.ProjectRepository
 	projectMemberRepo repoInterface.ProjectMemberRepository
 	taskAssigneeRepo  repoInterface.TaskAssigneeRepository
 	taskLabelRepo     repoInterface.TaskLabelRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
+	notifRepo         repoInterface.NotificationRepository
+	userRepo          repoInterface.UserRepository
 }
 
 func NewTaskBoardService(
+	tm *database.TransactionManager,
 	taskRepo repoInterface.TaskRepository,
 	columnRepo repoInterface.ColumnRepository,
 	projectRepo repoInterface.ProjectRepository,
 	projectMemberRepo repoInterface.ProjectMemberRepository,
 	taskAssigneeRepo repoInterface.TaskAssigneeRepository,
 	taskLabelRepo repoInterface.TaskLabelRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
+	notifRepo repoInterface.NotificationRepository,
+	userRepo repoInterface.UserRepository,
 ) _interface.TaskBoardService {
 	return &taskBoardService{
+		tm:                tm,
 		taskRepo:          taskRepo,
 		columnRepo:        columnRepo,
 		projectRepo:       projectRepo,
 		projectMemberRepo: projectMemberRepo,
 		taskAssigneeRepo:  taskAssigneeRepo,
 		taskLabelRepo:     taskLabelRepo,
+		activityLogRepo:   activityLogRepo,
+		notifRepo:         notifRepo,
+		userRepo:          userRepo,
 	}
 }
 
@@ -73,7 +87,7 @@ func (s *taskBoardService) getColumnOrFail(projectID, columnID string) (*models.
 	return col, nil
 }
 
-func (s *taskBoardService) buildBoardFilters(priority, assigneeID, labelID []string, dueDateFrom, dueDateTo, creatorID string, hasAssignee, overdue *bool, search string) map[string]interface{} {
+func (s *taskBoardService) buildBoardFilters(priority, assigneeID, labelID []string, dueDateFrom, dueDateTo, creatorID string, hasAssignee, hasLabel, overdue *bool, search string) map[string]interface{} {
 	filters := make(map[string]interface{})
 	if len(priority) > 0 {
 		filters["priority"] = priority
@@ -96,6 +110,9 @@ func (s *taskBoardService) buildBoardFilters(priority, assigneeID, labelID []str
 	if hasAssignee != nil {
 		filters["has_assignee"] = *hasAssignee
 	}
+	if hasLabel != nil {
+		filters["has_label"] = *hasLabel
+	}
 	if overdue != nil {
 		filters["overdue"] = *overdue
 	}
@@ -105,13 +122,13 @@ func (s *taskBoardService) buildBoardFilters(priority, assigneeID, labelID []str
 	return filters
 }
 
-func (s *taskBoardService) GetBoardData(workspaceID string, userID string, projectID string, priority []string, assigneeID []string, labelID []string, dueDateFrom string, dueDateTo string, creatorID string, hasAssignee *bool, overdue *bool, search string, tasksPerColumn int) (*dto.BoardResponse, error) {
+func (s *taskBoardService) GetBoardData(workspaceID string, userID string, projectID string, priority []string, assigneeID []string, labelID []string, dueDateFrom string, dueDateTo string, creatorID string, hasAssignee *bool, hasLabel *bool, overdue *bool, search string, tasksPerColumn int) (*dto.BoardResponse, error) {
 	_, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	filters := s.buildBoardFilters(priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, overdue, search)
+	filters := s.buildBoardFilters(priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, hasLabel, overdue, search)
 	result, err := s.taskRepo.GetBoardByProjectID(projectID, filters, tasksPerColumn)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -122,7 +139,7 @@ func (s *taskBoardService) GetBoardData(workspaceID string, userID string, proje
 	return result, nil
 }
 
-func (s *taskBoardService) LoadMoreTasksInColumn(workspaceID string, userID string, projectID string, columnID string, cursor string, limit int, priority []string, assigneeID []string, labelID []string, dueDateFrom string, dueDateTo string, creatorID string, hasAssignee *bool, overdue *bool, search string) (*dto.LoadMoreTasksResponse, error) {
+func (s *taskBoardService) LoadMoreTasksInColumn(workspaceID string, userID string, projectID string, columnID string, cursor string, limit int, priority []string, assigneeID []string, labelID []string, dueDateFrom string, dueDateTo string, creatorID string, hasAssignee *bool, hasLabel *bool, overdue *bool, search string) (*dto.LoadMoreTasksResponse, error) {
 	_, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
 		return nil, err
@@ -132,7 +149,7 @@ func (s *taskBoardService) LoadMoreTasksInColumn(workspaceID string, userID stri
 		return nil, err
 	}
 
-	filters := s.buildBoardFilters(priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, overdue, search)
+	filters := s.buildBoardFilters(priority, assigneeID, labelID, dueDateFrom, dueDateTo, creatorID, hasAssignee, hasLabel, overdue, search)
 	result, err := s.taskRepo.LoadMoreTasksInColumn(columnID, cursor, limit, filters)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to load more tasks")
@@ -163,86 +180,249 @@ func (s *taskBoardService) MoveTask(workspaceID string, userID string, projectID
 		return nil, apperror.NewAppError(http.StatusBadRequest, "CANNOT_MOVE_DELETED_TASK", "Task has been deleted")
 	}
 
-	col, err := s.getColumnOrFail(projectID, req.ColumnID)
+	targetCol, err := s.getColumnOrFail(projectID, req.ColumnID)
 	if err != nil {
 		return nil, err
 	}
-	_ = col
+	_ = targetCol
 
-	var newPos float64
-	needRebalance := false
+	isCrossColumn := req.ColumnID != task.ColumnID
 
-	existingColTasks, err := 	s.taskRepo.ListByColumnID(req.ColumnID)
-	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get column tasks")
+	if err := s.validatePositionContext(req, isCrossColumn, task.ColumnID); err != nil {
+		return nil, err
 	}
 
-	if len(existingColTasks) == 0 {
-		newPos = 1000
-	} else if req.PreviousPosition == nil && req.NextPosition != nil {
-		if *req.NextPosition <= 0 {
-			return nil, apperror.NewAppError(http.StatusBadRequest, "INVALID_POSITION_CONTEXT", "Invalid position context")
+	newPos, needRebalance, err := s.calculateNewPosition(req, isCrossColumn, task.ColumnID, task.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var oldColumn *models.Column
+	if isCrossColumn {
+		oldColumn, err = s.columnRepo.GetByID(task.ColumnID)
+		if err != nil {
+			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get source column")
 		}
-		newPos = *req.NextPosition / 2
-	} else if req.PreviousPosition != nil && req.NextPosition == nil {
-		newPos = *req.PreviousPosition + 1000
-	} else if req.PreviousPosition != nil && req.NextPosition != nil {
-		diff := *req.NextPosition - *req.PreviousPosition
-		if diff < 2 {
-			needRebalance = true
+	}
+
+	var updatedTaskID string
+	var responsePos float64
+	var allPositions *[]dto.TaskPositionInfo
+
+	now := time.Now()
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		txTaskRepo := s.taskRepo.WithTx(tx)
+
+		lastKnown := now
+		if req.LastKnownUpdatedAt != nil {
+			lastKnown = *req.LastKnownUpdatedAt
 		}
-		newPos = (*req.PreviousPosition + *req.NextPosition) / 2
-	} else {
+
+		affected, err := txTaskRepo.UpdatePositionAtomic(taskID, req.ColumnID, newPos, lastKnown)
+		if err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update task position")
+		}
+		if affected == 0 {
+			return apperror.ErrPositionConflict
+		}
+
+		responsePos = newPos
+		updatedTaskID = taskID
+
+		if needRebalance {
+			positions, err := txTaskRepo.RebalanceColumn(req.ColumnID)
+			if err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to rebalance column")
+			}
+			allPositions = &positions
+			for _, p := range positions {
+				if p.ID == taskID {
+					responsePos = p.Position
+					break
+				}
+			}
+		}
+
+		if isCrossColumn {
+			wsID := workspaceID
+			uID := userID
+			meta := map[string]interface{}{
+				"event":              "column_changed",
+				"from_column_id":     oldColumn.ID,
+				"from_column_title":  oldColumn.Title,
+				"to_column_id":       req.ColumnID,
+				"to_column_title":    targetCol.Title,
+			}
+			metaBytes, _ := json.Marshal(meta)
+			metaStr := string(metaBytes)
+			if err := tx.Create(&models.ActivityLog{
+				WorkspaceID: &wsID,
+				ProjectID:   &projectID,
+				UserID:      &uID,
+				Action:      models.ActivityActionUPDATE,
+				EntityType:  models.EntityTypeTASK,
+				EntityID:    taskID,
+				Metadata:    &metaStr,
+				CreatedAt:   time.Now(),
+			}).Error; err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to log activity")
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		var appErr *apperror.AppError
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
+		return nil, err
+	}
+
+	if isCrossColumn && task.ParentID == nil {
+		s.sendStatusChangeNotification(taskID, userID, project, task, oldColumn, targetCol)
+	}
+
+	ref := project.Key + "-" + fmt.Sprintf("%d", task.TaskNumber)
+
+	prevColID := req.ColumnID
+	if isCrossColumn {
+		prevColID = oldColumn.ID
+	}
+
+	return &dto.MoveTaskResponse{
+		ID:                  updatedTaskID,
+		TaskRef:             ref,
+		ColumnID:            req.ColumnID,
+		Position:            responsePos,
+		PreviousColumnID:    prevColID,
+		MovedBetweenColumns: isCrossColumn,
+		Rebalanced:          needRebalance,
+		AllPositions:        allPositions,
+		UpdatedAt:           now.Format(time.RFC3339),
+	}, nil
+}
+
+func (s *taskBoardService) validatePositionContext(req *dto.MoveTaskRequest, isCrossColumn bool, currentColumnID string) error {
+	if req.PreviousPosition == nil && req.NextPosition == nil {
+		return nil
+	}
+
+	posColumnID := req.ColumnID
+	if !isCrossColumn {
+		posColumnID = currentColumnID
+	}
+
+	if req.PreviousPosition != nil {
+		exists, err := s.taskRepo.ExistsInColumn(posColumnID, *req.PreviousPosition)
+		if err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate position")
+		}
+		if !exists {
+			return apperror.NewAppError(http.StatusBadRequest, "INVALID_POSITION_CONTEXT", "Previous position does not exist in target column")
+		}
+	}
+
+	if req.NextPosition != nil {
+		exists, err := s.taskRepo.ExistsInColumn(posColumnID, *req.NextPosition)
+		if err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate position")
+		}
+		if !exists {
+			return apperror.NewAppError(http.StatusBadRequest, "INVALID_POSITION_CONTEXT", "Next position does not exist in target column")
+		}
+	}
+
+	if req.PreviousPosition != nil && req.NextPosition != nil {
+		if *req.PreviousPosition >= *req.NextPosition {
+			return apperror.NewAppError(http.StatusBadRequest, "INVALID_POSITION_CONTEXT", "Previous position must be less than next position")
+		}
+		count, err := s.taskRepo.CountBetweenPositions(posColumnID, *req.PreviousPosition, *req.NextPosition)
+		if err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate position adjacency")
+		}
+		if count > 0 {
+			return apperror.NewAppError(http.StatusBadRequest, "INVALID_POSITION_CONTEXT", "Tasks exist between previous and next position")
+		}
+	}
+
+	return nil
+}
+
+func (s *taskBoardService) calculateNewPosition(req *dto.MoveTaskRequest, isCrossColumn bool, currentColumnID string, taskID string) (float64, bool, error) {
+	posColumnID := req.ColumnID
+	if !isCrossColumn {
+		posColumnID = currentColumnID
+	}
+
+	if req.PreviousPosition == nil && req.NextPosition == nil {
+		tasks, err := s.taskRepo.ListByColumnID(posColumnID)
+		if err != nil {
+			return 0, false, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list column tasks")
+		}
+
+		if len(tasks) == 0 || (len(tasks) == 1 && tasks[0].ID == taskID) {
+			return 1000, false, nil
+		}
 		lastPos := 0.0
-		for _, t := range existingColTasks {
+		for _, t := range tasks {
 			if t.ID != taskID && t.Position > lastPos {
 				lastPos = t.Position
 			}
 		}
-		newPos = lastPos + 1000
+		return lastPos + 1000, false, nil
 	}
 
-	if needRebalance {
-		if err := s.taskRepo.Reorder(req.ColumnID, nil); err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to rebalance tasks")
+	if req.PreviousPosition == nil && req.NextPosition != nil {
+		return *req.NextPosition / 2, false, nil
+	}
+
+	if req.PreviousPosition != nil && req.NextPosition == nil {
+		return *req.PreviousPosition + 1000, false, nil
+	}
+
+	gap := *req.NextPosition - *req.PreviousPosition
+	if gap < 0.001 {
+		return (*req.PreviousPosition + *req.NextPosition) / 2, true, nil
+	}
+	return (*req.PreviousPosition + *req.NextPosition) / 2, false, nil
+}
+
+func (s *taskBoardService) sendStatusChangeNotification(taskID, actorID string, project *models.Project, task *models.Task, oldCol, newCol *models.Column) {
+	assignees, err := s.taskAssigneeRepo.ListByTaskID(taskID)
+	if err != nil || len(assignees) == 0 {
+		return
+	}
+
+	actor, err := s.userRepo.GetByID(actorID)
+	if err != nil {
+		return
+	}
+
+	recipientIDs := make([]string, 0, len(assignees))
+	for _, a := range assignees {
+		if a.UserID != actorID {
+			recipientIDs = append(recipientIDs, a.UserID)
 		}
-		rebalancedTasks, err := 	s.taskRepo.ListByColumnID(req.ColumnID)
-		if err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get tasks after rebalance")
-		}
-		for i, t := range rebalancedTasks {
-			if t.ID == taskID {
-				newPos = float64((i + 1) * 1000)
-				break
-			}
-		}
+	}
+	if len(recipientIDs) == 0 {
+		return
 	}
 
-	previousColumn := task.ColumnID
-	task.ColumnID = req.ColumnID
-	task.Position = newPos
-	task.UpdatedAt = time.Now()
+	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+	title := fmt.Sprintf("%s: %s đã chuyển sang %s", taskRef, task.Title, newCol.Title)
+	content := fmt.Sprintf("Task được chuyển từ %s sang %s bởi %s.", oldCol.Title, newCol.Title, actor.FullName)
+	refURL := fmt.Sprintf("/workspaces/%s/projects/%s/tasks/%s", project.WorkspaceID, project.ID, taskID)
 
-	if err := s.taskRepo.Update(task); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update task position")
+	now := time.Now()
+	notification := &models.Notification{
+		ActorID:      &actorID,
+		Type:         models.NotificationTypeSTATUSCHANGED,
+		Title:        title,
+		Content:      &content,
+		ReferenceURL: &refURL,
+		CreatedAt:    now,
 	}
-
-	ref := ""
-	if project != nil {
-		ref = project.Key + "-"
-	}
-	ref = ref + fmt.Sprintf("%d", task.TaskNumber)
-
-	movedBetween := previousColumn != req.ColumnID
-
-	return &dto.MoveTaskResponse{
-		ID:                task.ID,
-		TaskRef:           ref,
-		ColumnID:          req.ColumnID,
-		Position:          newPos,
-		PreviousColumnID:  previousColumn,
-		MovedBetweenColumns: movedBetween,
-		Rebalanced:        needRebalance,
-		UpdatedAt:         task.UpdatedAt.Format(time.RFC3339),
-	}, nil
+	_ = s.notifRepo.Create(notification, recipientIDs)
 }
