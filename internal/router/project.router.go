@@ -31,36 +31,44 @@ func NewProjectRouter(
 func (r *ProjectRouter) RegisterRoutes(api *gin.RouterGroup) {
 	auth := middleware.AuthMiddleware()
 
-	projects := api.Group("/workspaces/:workspace_id/projects", auth)
+	projects := api.Group("/workspaces/:workspace_id/projects", auth, r.mw.RequireWorkspaceRole())
 	{
-		// Chỉ cần là workspace member mới thấy danh sách project
-		projects.GET("/", r.mw.RequireWorkspaceRole(), r.handler.ListProjects)
-		projects.POST("/", r.mw.RequireWorkspaceRole(), r.handler.CreateProject)
-		// Các thao tác trên project cụ thể → cần là project member
-		projects.GET("/:project_id", r.mw.RequireProjectMember(), r.handler.GetProjectDetails)
-		projects.PATCH("/:project_id", r.mw.RequireProjectPermission(middleware.PermProjectUpdate), r.handler.UpdateProject)
-		projects.PATCH("/:project_id/archive", r.mw.RequireProjectPermission(middleware.PermProjectArchive), r.handler.ArchiveProject)
-		projects.PATCH("/:project_id/unarchive", r.mw.RequireProjectPermission(middleware.PermProjectArchive), r.handler.UnarchiveProject)
-		projects.PATCH("/:project_id/favorite", r.mw.RequireProjectMember(), r.handler.ToggleFavorite)
-		projects.DELETE("/:project_id", r.mw.RequireProjectPermission(middleware.PermProjectDelete), r.handler.DeleteProject)
+		projects.GET("/", r.handler.ListProjects)
+		projects.POST("/", r.handler.CreateProject)
+
+		notArchived := r.mw.RequireProjectNotArchived()
+		projectMember := r.mw.RequireProjectMember()
+
+		projects.GET("/:project_id", projectMember, r.handler.GetProjectDetails)
+		projects.PATCH("/:project_id", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermProjectUpdate), r.handler.UpdateProject)
+		projects.PATCH("/:project_id/archive", projectMember, r.mw.RequireProjectPermission(middleware.PermProjectArchive), r.handler.ArchiveProject)
+		projects.PATCH("/:project_id/unarchive", projectMember, r.mw.RequireProjectPermission(middleware.PermProjectArchive), r.handler.UnarchiveProject)
+		projects.PATCH("/:project_id/favorite", projectMember, r.handler.ToggleFavorite)
+		projects.DELETE("/:project_id", projectMember, r.mw.RequireProjectPermission(middleware.PermProjectDelete), r.handler.DeleteProject)
 	}
 
-	columns := api.Group("/workspaces/:workspace_id/projects/:project_id/columns", auth)
+	columns := api.Group("/workspaces/:workspace_id/projects/:project_id/columns", auth, r.mw.RequireWorkspaceRole())
 	{
-		columns.GET("/", r.mw.RequireProjectMember(), r.columnHandler.ListColumns)
-		columns.POST("/", r.mw.RequireProjectPermission(middleware.PermColumnCreate), r.columnHandler.CreateColumn)
-		columns.PATCH("/:column_id/title", r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnTitle)
-		columns.PATCH("/:column_id/position", r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnPosition)
-		columns.DELETE("/:column_id", r.mw.RequireProjectPermission(middleware.PermColumnDelete), r.columnHandler.DeleteColumn)
+		notArchived := r.mw.RequireProjectNotArchived()
+		projectMember := r.mw.RequireProjectMember()
+
+		columns.GET("/", projectMember, r.columnHandler.ListColumns)
+		columns.POST("/", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermColumnCreate), r.columnHandler.CreateColumn)
+		columns.PATCH("/:column_id/title", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnTitle)
+		columns.PATCH("/:column_id/position", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermColumnUpdate), r.columnHandler.UpdateColumnPosition)
+		columns.DELETE("/:column_id", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermColumnDelete), r.columnHandler.DeleteColumn)
 	}
 
-	members := api.Group("/workspaces/:workspace_id/projects/:project_id/members", auth)
+	members := api.Group("/workspaces/:workspace_id/projects/:project_id/members", auth, r.mw.RequireWorkspaceRole())
 	{
-		members.GET("/", r.mw.RequireProjectMember(), r.memberHandler.ListMembers)
-		members.GET("/available", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.GetAvailableWorkspaceMembers)
-		members.POST("/", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.AddMembers)
-		members.PATCH("/:user_id/role", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.UpdateMemberRole)
-		members.DELETE("/:user_id", r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.RemoveMember)
-		members.DELETE("/me", r.mw.RequireProjectMember(), r.memberHandler.LeaveProject)
+		notArchived := r.mw.RequireProjectNotArchived()
+		projectMember := r.mw.RequireProjectMember()
+
+		members.GET("/", projectMember, r.memberHandler.ListMembers)
+		members.GET("/available", projectMember, r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.GetAvailableWorkspaceMembers)
+		members.POST("/", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.AddMembers)
+		members.PATCH("/:user_id/role", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.UpdateMemberRole)
+		members.DELETE("/:user_id", projectMember, notArchived, r.mw.RequireProjectPermission(middleware.PermProjectManageMembers), r.memberHandler.RemoveMember)
+		members.DELETE("/me", projectMember, r.memberHandler.LeaveProject)
 	}
 }

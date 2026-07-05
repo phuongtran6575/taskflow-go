@@ -16,4 +16,8 @@ type RoleRepository interface {
 	ListWithPagination(workspaceID string, search string, page int, limit int) ([]dto.RoleSummary, *dto.Pagination, error)
 	GetByIDWithDetail(workspaceID string, roleID string) (*dto.RoleDetailResponse, error)
 	GetAffectedProjectsByRoleID(roleID string) ([]dto.AffectedProject, int, error)
+
+	// ValidateRoleIDsBelongToWorkspace returns list of role IDs that do NOT belong to the workspace.
+	// Returns empty slice if all role IDs are valid. (BR-PRA-04)
+	ValidateRoleIDsBelongToWorkspace(roleIDs []string, workspaceID string) ([]string, error)
 }

@@ -128,6 +128,7 @@ func NewContainer(db *gorm.DB) *Container {
 		c.WorkspaceMemberRepo,
 		c.WorkspaceRepo,
 		c.ProjectMemberRepo,
+		c.ProjectRepo,
 	)
 
 	// --- Initialize Services ---
@@ -139,8 +140,8 @@ func NewContainer(db *gorm.DB) *Container {
 	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo)
 	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo)
 	c.RoleService = serviceImpl.NewRoleService(c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.ActivityLogRepo)
-	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo)
-	c.ProjectMemberService = serviceImpl.NewProjectMemberService(c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo)
+	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo, c.ActivityLogRepo, dispatcher)
+	c.ProjectMemberService = serviceImpl.NewProjectMemberService(c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo, c.NotificationRepo, c.ActivityLogRepo)
 	c.ColumnService = serviceImpl.NewColumnService(c.ColumnRepo, c.ProjectRepo)
 	c.TaskService = serviceImpl.NewTaskService(c.TaskRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.LabelRepo)
 	c.TaskAssigneeService = serviceImpl.NewTaskAssigneeService(c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo)

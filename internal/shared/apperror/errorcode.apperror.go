@@ -25,6 +25,18 @@ type InvalidPermissionIDsError struct {
 	InvalidIDs []string `json:"invalid_ids"`
 }
 
+// InvalidRoleIDsError carries invalid role IDs for INVALID_ROLE_ID response (BR-PRA-04, BR-PRA-05)
+type InvalidRoleIDsError struct {
+	*AppError
+	InvalidRoleIDs []string `json:"invalid_role_ids"`
+}
+
+// InvalidUserIDsError carries invalid user IDs for USER_NOT_IN_WORKSPACE response (BR-PRA-05)
+type InvalidUserIDsError struct {
+	*AppError
+	InvalidUserIDs []string `json:"invalid_user_ids"`
+}
+
 var (
 	// Auth errors
 	ErrInvalidCredentials  = &AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}
@@ -96,6 +108,7 @@ var (
 
 	// Project member errors
 	ErrMembersRequired               = &AppError{Status: http.StatusBadRequest, Code: "MEMBERS_REQUIRED", Message: "Members array is required"}
+	ErrMemberBatchSizeExceeded       = &AppError{Status: http.StatusBadRequest, Code: "MEMBER_BATCH_SIZE_EXCEEDED", Message: "Maximum 50 members per request"}
 	ErrInvalidRoleID                 = &AppError{Status: http.StatusBadRequest, Code: "INVALID_ROLE_ID", Message: "One or more role IDs are invalid"}
 	ErrUserNotInWorkspace            = &AppError{Status: http.StatusBadRequest, Code: "USER_NOT_IN_WORKSPACE", Message: "One or more users are not workspace members"}
 	ErrCannotRemoveSelf              = &AppError{Status: http.StatusBadRequest, Code: "CANNOT_REMOVE_SELF", Message: "Use DELETE /me instead"}

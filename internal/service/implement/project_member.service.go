@@ -1,8 +1,11 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -19,6 +22,8 @@ type projectMemberService struct {
 	workspaceRepo      repoInterface.WorkspaceRepository
 	projectRepo        repoInterface.ProjectRepository
 	roleRepo           repoInterface.RoleRepository
+	notifRepo          repoInterface.NotificationRepository
+	activityLogRepo    repoInterface.ActivityLogRepository
 }
 
 func NewProjectMemberService(
@@ -27,13 +32,17 @@ func NewProjectMemberService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	projectRepo repoInterface.ProjectRepository,
 	roleRepo repoInterface.RoleRepository,
+	notifRepo repoInterface.NotificationRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
 ) _interface.ProjectMemberService {
 	return &projectMemberService{
-		memberRepo:    memberRepo,
-		wsMemberRepo:  wsMemberRepo,
-		workspaceRepo: workspaceRepo,
-		projectRepo:   projectRepo,
-		roleRepo:      roleRepo,
+		memberRepo:      memberRepo,
+		wsMemberRepo:    wsMemberRepo,
+		workspaceRepo:   workspaceRepo,
+		projectRepo:     projectRepo,
+		roleRepo:        roleRepo,
+		notifRepo:       notifRepo,
+		activityLogRepo: activityLogRepo,
 	}
 }
 
@@ -65,6 +74,46 @@ func (s *projectMemberService) isWorkspaceOwner(workspaceID, userID string) (boo
 	return ws.OwnerID == userID, nil
 }
 
+// logActivity ghi activity log cho project member operations (BR-PRA-08)
+func (s *projectMemberService) logActivity(workspaceID, projectID, userID string, action models.ActivityAction, metadata map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		s := string(b)
+		metaStr = &s
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &wsID,
+		ProjectID:   &projectID,
+		UserID:      &uID,
+		Action:      action,
+		EntityType:  models.EntityTypePROJECT,
+		EntityID:    projectID,
+		Metadata:    metaStr,
+	})
+}
+
+// sendNotification tạo notification và gửi đến recipient (BR-PRA-07)
+func (s *projectMemberService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
+	now := time.Now()
+	ref := &referenceURL
+	if referenceURL == "" {
+		ref = nil
+	}
+	contentPtr := &content
+	notification := &models.Notification{
+		ActorID:      &actorID,
+		Type:         notifType,
+		Title:        title,
+		Content:      contentPtr,
+		ReferenceURL: ref,
+		CreatedAt:    now,
+	}
+	_ = s.notifRepo.Create(notification, []string{recipientID})
+}
+
 func (s *projectMemberService) ListMembers(workspaceID string, userID string, projectID string, page int, limit int, search string, roleID string) ([]dto.ProjectMemberInfo, *dto.Pagination, error) {
 	_, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
@@ -93,6 +142,11 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 		return nil, apperror.ErrMembersRequired
 	}
 
+	// BR-PRA-05: Giới hạn batch size tối đa 50 members
+	if len(req.Members) > 50 {
+		return nil, apperror.ErrMemberBatchSizeExceeded
+	}
+
 	var userIDs []string
 	var roleIDs []string
 	roleIDSet := make(map[string]struct{})
@@ -102,27 +156,34 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 		roleIDSet[m.RoleID] = struct{}{}
 	}
 
+	// Validate user IDs — tất cả phải là workspace members (BR-PRA-05)
+	var invalidUserIDs []string
 	for _, uid := range userIDs {
 		_, err := s.wsMemberRepo.GetByID(workspaceID, uid)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, apperror.NewAppError(http.StatusBadRequest, "USER_NOT_IN_WORKSPACE", "User(s) not found in workspace")
+				invalidUserIDs = append(invalidUserIDs, uid)
+				continue
 			}
 			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to verify workspace membership")
 		}
 	}
+	if len(invalidUserIDs) > 0 {
+		return nil, &apperror.InvalidUserIDsError{
+			AppError:       apperror.NewAppError(http.StatusBadRequest, "USER_NOT_IN_WORKSPACE", "One or more users are not workspace members"),
+			InvalidUserIDs: invalidUserIDs,
+		}
+	}
 
-	wsRoles, err := 	s.roleRepo.ListByWorkspaceID(workspaceID)
+	// BR-PRA-04: Validate role IDs thuộc workspace
+	invalidRoleIDs, err := s.roleRepo.ValidateRoleIDsBelongToWorkspace(roleIDs, workspaceID)
 	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get roles")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate role IDs")
 	}
-	validRoleIDs := make(map[string]struct{}, len(wsRoles))
-	for _, r := range wsRoles {
-		validRoleIDs[r.ID] = struct{}{}
-	}
-	for _, rid := range roleIDs {
-		if _, ok := validRoleIDs[rid]; !ok {
-			return nil, apperror.NewAppError(http.StatusBadRequest, "INVALID_ROLE_ID", "One or more role IDs do not belong to this workspace")
+	if len(invalidRoleIDs) > 0 {
+		return nil, &apperror.InvalidRoleIDsError{
+			AppError:       apperror.NewAppError(http.StatusBadRequest, "INVALID_ROLE_ID", "One or more role IDs do not belong to this workspace"),
+			InvalidRoleIDs: invalidRoleIDs,
 		}
 	}
 
@@ -158,12 +219,18 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to add members")
 	}
 
-	roleMap := make(map[string]string)
+	// Fetch role names for response and notification
+	wsRoles, err := s.roleRepo.ListByWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get roles")
+	}
+	roleMap := make(map[string]string, len(wsRoles))
 	for _, r := range wsRoles {
 		roleMap[r.ID] = r.Name
 	}
 
 	var addedInfos []dto.AddedMemberInfo
+	addedUserInfo := make([]map[string]interface{}, 0, len(createdMembers))
 	for _, cm := range createdMembers {
 		roleName := ""
 		if cm.RoleID != nil {
@@ -178,7 +245,27 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 			},
 			JoinedAt: cm.JoinedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
+
+		// BR-PRA-07: Gửi notification ADDED_TO_PROJECT trước khi INSERT (đã insert rồi ở bulk)
+		s.sendNotification(
+			cm.UserID, userID,
+			models.NotificationTypeADDEDTOPROJECT,
+			fmt.Sprintf("Bạn đã được thêm vào project %s", project.Name),
+			fmt.Sprintf("Bạn tham gia với vai trò %s bởi %s.", roleName, userID),
+			"",
+		)
+
+		addedUserInfo = append(addedUserInfo, map[string]interface{}{
+			"user_id":   cm.UserID,
+			"role_name": roleName,
+		})
 	}
+
+	// BR-PRA-08: Activity log cho member_added
+	s.logActivity(workspaceID, projectID, userID, models.ActivityActionCREATE, map[string]interface{}{
+		"event":       "member_added",
+		"added_users": addedUserInfo,
+	})
 
 	return &dto.AddMembersResponse{
 		Added:                addedInfos,
@@ -188,7 +275,7 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 }
 
 func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID string, projectID string, targetUserID string, req *dto.UpdateProjectMemberRoleRequest) (*dto.UpdateProjectMemberRoleResponse, error) {
-	_, err := s.getProjectOrFail(workspaceID, projectID)
+	project, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,15 +299,11 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 		return nil, apperror.ErrCannotChangeWorkspaceOwnerRole
 	}
 
-	wsRoles, err := 	s.roleRepo.ListByWorkspaceID(workspaceID)
+	invalidRoleIDs, err := s.roleRepo.ValidateRoleIDsBelongToWorkspace([]string{req.RoleID}, workspaceID)
 	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get roles")
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate role ID")
 	}
-	validRoleIDs := make(map[string]struct{}, len(wsRoles))
-	for _, r := range wsRoles {
-		validRoleIDs[r.ID] = struct{}{}
-	}
-	if _, ok := validRoleIDs[req.RoleID]; !ok {
+	if len(invalidRoleIDs) > 0 {
 		return nil, apperror.ErrInvalidRoleID
 	}
 
@@ -253,6 +336,31 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 		}
 	}
 
+	// BR-PRA-07: Gửi notification STATUS_CHANGED
+	oldRoleName := ""
+	if prevRoleRef != nil {
+		oldRoleName = prevRoleRef.Name
+	}
+	newRoleName := ""
+	if currentRoleRef != nil {
+		newRoleName = currentRoleRef.Name
+	}
+	s.sendNotification(
+		targetUserID, userID,
+		models.NotificationTypeSTATUSCHANGED,
+		fmt.Sprintf("Role của bạn trong %s đã thay đổi", project.Name),
+		fmt.Sprintf("Role của bạn được đổi từ %s sang %s bởi %s.", oldRoleName, newRoleName, userID),
+		"",
+	)
+
+	// BR-PRA-08: Activity log cho role_changed
+	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":         "role_changed",
+		"user_id":       targetUserID,
+		"old_role_name": oldRoleName,
+		"new_role_name": newRoleName,
+	})
+
 	return &dto.UpdateProjectMemberRoleResponse{
 		UserID:       member.UserID,
 		FullName:     member.User.FullName,
@@ -264,7 +372,7 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 }
 
 func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userID string, projectID string, targetUserID string) (*dto.RemoveProjectMemberResponse, error) {
-	_, err := s.getProjectOrFail(workspaceID, projectID)
+	project, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,9 +396,25 @@ func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userI
 		return nil, apperror.ErrCannotRemoveWorkspaceOwner
 	}
 
+	// BR-PRA-07: Gửi notification ANNOUNCEMENT trước khi DELETE
+	s.sendNotification(
+		targetUserID, userID,
+		models.NotificationTypeANNOUNCEMENT,
+		fmt.Sprintf("Bạn đã bị xóa khỏi project %s", project.Name),
+		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
+		"",
+	)
+
 	if err := s.memberRepo.Delete(projectID, targetUserID); err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to remove member")
 	}
+
+	// BR-PRA-08: Activity log cho member_removed
+	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":      "member_removed",
+		"user_id":    targetUserID,
+		"removed_by": "manager",
+	})
 
 	return &dto.RemoveProjectMemberResponse{
 		Message:       "Member has been removed from the project.",
@@ -299,7 +423,7 @@ func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userI
 }
 
 func (s *projectMemberService) LeaveProject(workspaceID string, userID string, projectID string, req *dto.LeaveProjectRequest) (*dto.LeaveProjectResponse, error) {
-	_, err := s.getProjectOrFail(workspaceID, projectID)
+	project, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,9 +447,25 @@ func (s *projectMemberService) LeaveProject(workspaceID string, userID string, p
 		return nil, apperror.ErrWorkspaceOwnerCannotLeave
 	}
 
+	// BR-PRA-07: Gửi notification ANNOUNCEMENT trước khi DELETE
+	s.sendNotification(
+		userID, userID,
+		models.NotificationTypeANNOUNCEMENT,
+		fmt.Sprintf("Bạn đã rời khỏi project %s", project.Name),
+		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
+		"",
+	)
+
 	if err := s.memberRepo.Delete(projectID, userID); err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to leave project")
 	}
+
+	// BR-PRA-08: Activity log cho member_removed (self)
+	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
+		"event":      "member_removed",
+		"user_id":    userID,
+		"removed_by": "self",
+	})
 
 	return &dto.LeaveProjectResponse{
 		Message:       "You have left the project successfully.",

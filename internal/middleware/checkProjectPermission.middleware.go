@@ -16,6 +16,8 @@ import (
 // Dùng cho các action mà mọi project member đều được phép (xem board, xem task...).
 //
 // Sau middleware này, handler có thể đọc "project_role_id" từ context nếu cần.
+//
+// BR-PRA-03: Workspace OWNER bypass — tự động có quyền trong mọi project
 func (m *Middleware) RequireProjectMember() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		projectID := c.Param("project_id")
@@ -32,6 +34,14 @@ func (m *Middleware) RequireProjectMember() gin.HandlerFunc {
 			return
 		}
 		userID := userIDVal.(string)
+
+		// BR-PRA-03: Workspace OWNER bypass — không cần trong project_members
+		if wsRole, ok := c.Get("workspace_role"); ok {
+			if wsRole.(string) == "OWNER" {
+				c.Next()
+				return
+			}
+		}
 
 		member, err := m.projectMemberRepo.GetByID(projectID, userID)
 		if err != nil {
@@ -61,7 +71,7 @@ func (m *Middleware) RequireProjectMember() gin.HandlerFunc {
 //	tasks.POST("/", mw.RequireProjectPermission(middleware.PermTaskCreate), handler.CreateTask)
 //	tasks.DELETE("/:id", mw.RequireProjectPermission(middleware.PermTaskDelete), handler.DeleteTask)
 //
-// Workspace OWNER/ADMIN có thể bypass check này bằng cách xem workspace_role từ context.
+// Workspace OWNER bypass check này (BR-PRA-03). ADMIN không được bypass.
 func (m *Middleware) RequireProjectPermission(requiredSlugs ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		projectID := c.Param("project_id")
@@ -79,11 +89,11 @@ func (m *Middleware) RequireProjectPermission(requiredSlugs ...string) gin.Handl
 		}
 		userID := userIDVal.(string)
 
-		// Workspace OWNER/ADMIN bypass project-level RBAC
-		// (họ đã được check ở RequireWorkspaceRole trước đó nếu cần)
+		// Workspace OWNER bypass project-level RBAC (BR-PRA-03)
+		// ADMIN không được bypass — phải qua project membership check
 		if wsRole, ok := c.Get("workspace_role"); ok {
 			role := wsRole.(string)
-			if role == "OWNER" || role == "ADMIN" {
+			if role == "OWNER" {
 				c.Next()
 				return
 			}

@@ -125,6 +125,29 @@ func (r *roleRepository) ListWithPagination(workspaceID string, search string, p
 	}, nil
 }
 
+func (r *roleRepository) ValidateRoleIDsBelongToWorkspace(roleIDs []string, workspaceID string) ([]string, error) {
+	if len(roleIDs) == 0 {
+		return nil, nil
+	}
+	var validIDs []string
+	if err := r.db.Model(&models.Role{}).
+		Where("id IN ? AND workspace_id = ?", roleIDs, workspaceID).
+		Pluck("id", &validIDs).Error; err != nil {
+		return nil, err
+	}
+	validSet := make(map[string]struct{}, len(validIDs))
+	for _, id := range validIDs {
+		validSet[id] = struct{}{}
+	}
+	var invalidIDs []string
+	for _, id := range roleIDs {
+		if _, ok := validSet[id]; !ok {
+			invalidIDs = append(invalidIDs, id)
+		}
+	}
+	return invalidIDs, nil
+}
+
 func (r *roleRepository) GetByIDWithDetail(workspaceID string, roleID string) (*dto.RoleDetailResponse, error) {
 	var role models.Role
 	err := r.db.Where("id = ? AND workspace_id = ?", roleID, workspaceID).First(&role).Error

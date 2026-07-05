@@ -116,6 +116,28 @@ func (h *ProjectMemberHandler) AddMembers(c *gin.Context) {
 	}
 	result, err := h.memberService.AddMembersToProject(workspaceID, userID, projectID, &req)
 	if err != nil {
+		var invRoleErr *apperror.InvalidRoleIDsError
+		if errors.As(err, &invRoleErr) {
+			appresponse.FailWithData(c, http.StatusBadRequest, "INVALID_ROLE_ID",
+				invRoleErr.Message,
+				map[string]interface{}{
+					"code":            "INVALID_ROLE_ID",
+					"invalid_role_ids": invRoleErr.InvalidRoleIDs,
+				},
+			)
+			return
+		}
+		var invUserErr *apperror.InvalidUserIDsError
+		if errors.As(err, &invUserErr) {
+			appresponse.FailWithData(c, http.StatusBadRequest, "USER_NOT_IN_WORKSPACE",
+				invUserErr.Message,
+				map[string]interface{}{
+					"code":             "USER_NOT_IN_WORKSPACE",
+					"invalid_user_ids": invUserErr.InvalidUserIDs,
+				},
+			)
+			return
+		}
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
 			appresponse.Fail(c, appErr.Status, appErr.Code, appErr.Message)

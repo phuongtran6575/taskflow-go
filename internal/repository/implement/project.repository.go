@@ -92,7 +92,8 @@ func (r *projectRepository) GetListMemberProject(workspaceID string, userID stri
 			"r.id as role_id, r.name as role_name, pm.joined_at, "+
 			"(select count(*) from project_members pm2 where pm2.project_id = p.id) as member_count, "+
 			"(select count(*) from tasks t where t.project_id = p.id and t.deleted_at is null) as open_task_count").
-		Offset(param.Offset()).Limit(param.Limit).Order("p.created_at DESC").
+		Offset(param.Offset()).Limit(param.Limit).
+		Order("CASE WHEN pm.is_favorite = true THEN 0 ELSE 1 END ASC, pm.joined_at DESC, p.created_at DESC").
 		Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}
@@ -162,7 +163,8 @@ func (r *projectRepository) GetListWorkspaceProject(workspaceID string, userID s
 			"coalesce(pm.joined_at, p.created_at) as joined_at, "+
 			"(select count(*) from project_members pm2 where pm2.project_id = p.id) as member_count, "+
 			"(select count(*) from tasks t where t.project_id = p.id and t.deleted_at is null) as open_task_count").
-		Offset(param.Offset()).Limit(param.Limit).Order("p.created_at DESC").
+		Offset(param.Offset()).Limit(param.Limit).
+		Order("CASE WHEN coalesce(pm.is_favorite, false) = true THEN 0 ELSE 1 END ASC, coalesce(pm.joined_at, p.created_at) DESC, p.created_at DESC").
 		Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}
@@ -223,6 +225,12 @@ func (r *projectRepository) Update(project *models.Project) error {
 
 func (r *projectRepository) Delete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&models.Project{}).Error
+}
+
+func (r *projectRepository) CountTasksByProject(projectID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Task{}).Where("project_id = ?", projectID).Count(&count).Error
+	return count, err
 }
 
 func (r *projectRepository) GetByIDWithDetail(workspaceID string, userID string, projectID string) (*dto.ProjectDetailResponse, error) {

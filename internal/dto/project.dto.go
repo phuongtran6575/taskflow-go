@@ -4,7 +4,7 @@ import "time"
 
 type CreateProjectRequest struct {
 	Name       string  `json:"name" binding:"required"`
-	Key        string  `json:"key" binding:"required"`
+	Key        *string `json:"key,omitempty"`
 	Icon       *string `json:"icon,omitempty"`
 	Background *string `json:"background,omitempty"`
 }

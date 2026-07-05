@@ -19,4 +19,5 @@ type ProjectRepository interface {
 	GetListMemberProject(workspaceID string, userID string, isArchived *bool, isFavorite *bool, search string, param dto.PaginationParam) ([]dto.ProjectSummary, *dto.Pagination, error)
 	GetListWorkspaceProject(workspaceID string, userID string, isArchived *bool, isFavorite *bool, search string, param dto.PaginationParam) ([]dto.ProjectSummary, *dto.Pagination, error)
 	GetByIDWithDetail(workspaceID string, userID string, projectID string) (*dto.ProjectDetailResponse, error)
+	CountTasksByProject(projectID string) (int64, error)
 }
