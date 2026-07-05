@@ -61,10 +61,10 @@ func (s *storageService) GetWorkspaceStorageUsage(workspaceID string, userID str
 		warnings = append(warnings, "Workspace storage quota exceeded. Please upgrade your plan or free up space.")
 	} else if percentageUsed > 95 {
 		status = "CRITICAL"
-		warnings = append(warnings, fmt.Sprintf("You have used %d%% of your storage quota (%s / %s). Please free up space.", percentageUsed, formatSizeDisplay(usedBytes), formatSizeDisplay(limitBytes)))
+		warnings = append(warnings, fmt.Sprintf("You have used %d%% of your storage quota (%s / %s). Please free up space.", percentageUsed, helper.FormatSizeDisplay(usedBytes), helper.FormatSizeDisplay(limitBytes)))
 	} else if percentageUsed > 80 {
 		status = "WARNING"
-		warnings = append(warnings, fmt.Sprintf("You have used %d%% of your storage quota (%s / %s). Consider upgrading your plan.", percentageUsed, formatSizeDisplay(usedBytes), formatSizeDisplay(limitBytes)))
+		warnings = append(warnings, fmt.Sprintf("You have used %d%% of your storage quota (%s / %s). Consider upgrading your plan.", percentageUsed, helper.FormatSizeDisplay(usedBytes), helper.FormatSizeDisplay(limitBytes)))
 	}
 
 	planName := string(workspace.Plan)
@@ -78,8 +78,8 @@ func (s *storageService) GetWorkspaceStorageUsage(workspaceID string, userID str
 		Storage: dto.StorageInfo{
 			UsedBytes:      usedBytes,
 			LimitBytes:     limitBytes,
-			UsedDisplay:    formatSizeDisplay(usedBytes),
-			LimitDisplay:   formatSizeDisplay(limitBytes),
+			UsedDisplay:    helper.FormatSizeDisplay(usedBytes),
+			LimitDisplay:   helper.FormatSizeDisplay(limitBytes),
 			PercentageUsed: percentageUsed,
 			Status:         status,
 		},

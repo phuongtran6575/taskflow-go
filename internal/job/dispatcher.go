@@ -33,3 +33,18 @@ func (d *Dispatcher) CascadeSoftDeleteProject(projectID string) {
 		}
 	}()
 }
+
+func (d *Dispatcher) StartDailyJobs() {
+	go func() {
+		log.Println("[job] Starting daily jobs...")
+		startDailyPermanentDelete(d.db)
+		startDailyNotificationCleanup(d.db)
+	}()
+}
+
+func (d *Dispatcher) StartTaskDueSoonCron() {
+	go func() {
+		log.Println("[job] Starting TASK_DUE_SOON cron...")
+		startTaskDueSoonCron(d.db)
+	}()
+}

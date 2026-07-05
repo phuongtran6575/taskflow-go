@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	_interface "TaskFlow-Go/internal/repository/interface"
 )
@@ -31,17 +32,38 @@ func (r *attachmentRepository) Delete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&models.Attachment{}).Error
 }
 
+func (r *attachmentRepository) SoftDelete(id string, scheduledAt time.Time) error {
+	return r.db.Model(&models.Attachment{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"deleted_at":          time.Now(),
+			"scheduled_delete_at": scheduledAt,
+		}).Error
+}
+
+func (r *attachmentRepository) HardDelete(id string) error {
+	return r.db.Unscoped().Where("id = ?", id).Delete(&models.Attachment{}).Error
+}
+
+func (r *attachmentRepository) ListExpiredForDeletion() ([]models.Attachment, error) {
+	var attachments []models.Attachment
+	err := r.db.Unscoped().
+		Where("deleted_at IS NOT NULL AND scheduled_delete_at IS NOT NULL AND scheduled_delete_at <= NOW()").
+		Find(&attachments).Error
+	return attachments, err
+}
+
 func (r *attachmentRepository) ListByTaskIDWithPagination(taskID string, fileType string, page int, limit int) (*dto.AttachmentListResponse, error) {
 	type attachmentRow struct {
-		ID              string    `gorm:"column:id"`
-		FileName        string    `gorm:"column:file_name"`
-		FileType        string    `gorm:"column:file_type"`
-		SizeBytes       int64     `gorm:"column:size_bytes"`
-		CreatedAt       time.Time `gorm:"column:created_at"`
-		UploaderID      string    `gorm:"column:uploader_user_id"`
-		UploaderName    string    `gorm:"column:uploader_full_name"`
-		UploaderAvatar  *string   `gorm:"column:uploader_avatar_url"`
-		TaskRef         string    `gorm:"column:task_ref"`
+		ID             string    `gorm:"column:id"`
+		FileName       string    `gorm:"column:file_name"`
+		FileType       string    `gorm:"column:file_type"`
+		SizeBytes      int64     `gorm:"column:size_bytes"`
+		CreatedAt      time.Time `gorm:"column:created_at"`
+		UploaderID     string    `gorm:"column:uploader_user_id"`
+		UploaderName   string    `gorm:"column:uploader_full_name"`
+		UploaderAvatar *string   `gorm:"column:uploader_avatar_url"`
+		TaskRef        string    `gorm:"column:task_ref"`
 	}
 	type taskInfo struct {
 		TaskID  string `gorm:"column:task_id"`
@@ -94,7 +116,13 @@ func (r *attachmentRepository) ListByTaskIDWithPagination(taskID string, fileTyp
 
 	data := make([]dto.AttachmentInfo, len(rows))
 	for i, row := range rows {
-		fileGroup := classifyFileType(row.FileType)
+		fileGroup := helper.ClassifyFileType(row.FileType)
+		thumbnailURL := fmt.Sprintf("/api/v1/files/%s/thumbnail", row.ID)
+		var thumbPtr *string
+		if fileGroup == "image" {
+			thumbPtr = &thumbnailURL
+		}
+
 		data[i] = dto.AttachmentInfo{
 			ID:        row.ID,
 			FileName:  row.FileName,
@@ -102,8 +130,8 @@ func (r *attachmentRepository) ListByTaskIDWithPagination(taskID string, fileTyp
 			FileType:  row.FileType,
 			FileGroup: fileGroup,
 			SizeBytes: row.SizeBytes,
-			SizeDisplay: formatSizeDisplay(row.SizeBytes),
-			ThumbnailURL: nil,
+			SizeDisplay: helper.FormatSizeDisplay(row.SizeBytes),
+			ThumbnailURL: thumbPtr,
 			Uploader: dto.AttachmentUploader{
 				UserID:    row.UploaderID,
 				FullName:  row.UploaderName,
@@ -155,7 +183,7 @@ func (r *attachmentRepository) GetStorageUsageByWorkspace(workspaceID string) (*
 			ProjectName: row.ProjectName,
 			ProjectKey:  row.ProjectKey,
 			UsedBytes:   row.UsedBytes,
-			UsedDisplay: formatSizeDisplay(row.UsedBytes),
+			UsedDisplay: helper.FormatSizeDisplay(row.UsedBytes),
 			FileCount:   row.FileCount,
 		}
 		totalBytes += row.UsedBytes
@@ -170,31 +198,4 @@ func (r *attachmentRepository) GetStorageUsageByWorkspace(workspaceID string) (*
 	}, nil
 }
 
-func classifyFileType(ext string) string {
-	imageTypes := map[string]bool{"jpg": true, "jpeg": true, "png": true, "gif": true, "webp": true, "svg": true}
-	documentTypes := map[string]bool{"pdf": true, "doc": true, "docx": true, "xls": true, "xlsx": true, "txt": true, "csv": true, "ppt": true, "pptx": true}
-	videoTypes := map[string]bool{"mp4": true, "mov": true, "avi": true, "mkv": true, "webm": true}
-	if imageTypes[ext] {
-		return "image"
-	}
-	if documentTypes[ext] {
-		return "document"
-	}
-	if videoTypes[ext] {
-		return "video"
-	}
-	return "other"
-}
 
-func formatSizeDisplay(bytes int64) string {
-	if bytes < 1024 {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	if bytes < 1024*1024 {
-		return fmt.Sprintf("%.0f KB", float64(bytes)/1024)
-	}
-	if bytes < 1024*1024*1024 {
-		return fmt.Sprintf("%.0f MB", float64(bytes)/(1024*1024))
-	}
-	return fmt.Sprintf("%.0f GB", float64(bytes)/(1024*1024*1024))
-}

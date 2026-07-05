@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,47 +12,27 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/markdown"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
 )
 
-var (
-	mentionExtractRe = regexp.MustCompile(`@(\w+)`)
-	mentionReplaceRe = regexp.MustCompile(`@(\w+)`)
-	urlReplaceRe     = regexp.MustCompile(`https?://[^\s<>"]+|www\.[^\s<>"]+`)
-	httpPrefixRe     = regexp.MustCompile(`^https?://`)
-)
-
-func renderCommentHTML(content string, mentions []dto.MentionUser) string {
-	mentionMap := make(map[string]string)
-	for _, m := range mentions {
-		mentionMap[m.Username] = m.UserID
-	}
-	result := content
-	result = mentionReplaceRe.ReplaceAllStringFunc(result, func(match string) string {
-		username := match[1:]
-		if uid, ok := mentionMap[username]; ok {
-			return fmt.Sprintf(`<span class="mention" data-user-id="%s">%s</span>`, uid, match)
-		}
-		return match
-	})
-	result = urlReplaceRe.ReplaceAllStringFunc(result, func(match string) string {
-		href := match
-		if !httpPrefixRe.MatchString(match) {
-			href = "https://" + match
-		}
-		return fmt.Sprintf(`<a href="%s">%s</a>`, href, match)
-	})
-	return "<p>" + result + "</p>"
-}
+var mentionExtractRe = regexp.MustCompile(`@([a-zA-Z0-9_]{3,30})`)
 
 type commentService struct {
 	commentRepo       repoInterface.CommentRepository
 	taskRepo          repoInterface.TaskRepository
 	projectRepo       repoInterface.ProjectRepository
 	projectMemberRepo repoInterface.ProjectMemberRepository
+	taskAssigneeRepo  repoInterface.TaskAssigneeRepository
+	workspaceRepo     repoInterface.WorkspaceRepository
+	notifRepo         repoInterface.NotificationRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
+	userRepo          repoInterface.UserRepository
+	dispatcher        *notif.Dispatcher
 }
 
 func NewCommentService(
@@ -59,12 +40,24 @@ func NewCommentService(
 	taskRepo repoInterface.TaskRepository,
 	projectRepo repoInterface.ProjectRepository,
 	projectMemberRepo repoInterface.ProjectMemberRepository,
+	taskAssigneeRepo repoInterface.TaskAssigneeRepository,
+	workspaceRepo repoInterface.WorkspaceRepository,
+	notifRepo repoInterface.NotificationRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.CommentService {
 	return &commentService{
 		commentRepo:       commentRepo,
 		taskRepo:          taskRepo,
 		projectRepo:       projectRepo,
 		projectMemberRepo: projectMemberRepo,
+		taskAssigneeRepo:  taskAssigneeRepo,
+		workspaceRepo:     workspaceRepo,
+		notifRepo:         notifRepo,
+		activityLogRepo:   activityLogRepo,
+		userRepo:          userRepo,
+		dispatcher:        dispatcher,
 	}
 }
 
@@ -99,12 +92,34 @@ func (s *commentService) getTaskOrFail(projectID, taskID string) (*models.Task, 
 	return task, nil
 }
 
-func (s *commentService) extractAndResolveMentions(projectID string, content string) ([]dto.MentionUser, []string) {
+func (s *commentService) canDeleteComment(workspaceID, projectID, userID string, comment *models.Comment) error {
+	ws, err := s.workspaceRepo.GetByID(workspaceID)
+	if err == nil && ws.OwnerID == userID {
+		return nil
+	}
+
+	isOwner := comment.UserID != nil && *comment.UserID == userID
+	if isOwner {
+		hasPerm, err := s.projectMemberRepo.HasPermission(projectID, userID, "comment:delete_own")
+		if err == nil && hasPerm {
+			return nil
+		}
+	}
+
+	hasAny, err := s.projectMemberRepo.HasPermission(projectID, userID, "comment:delete_any")
+	if err == nil && hasAny {
+		return nil
+	}
+
+	return apperror.ErrForbidden
+}
+
+func (s *commentService) extractAndResolveMentions(workspaceID, projectID string, content string) ([]dto.MentionUser, []string) {
 	matches := mentionExtractRe.FindAllStringSubmatch(content, -1)
 	seen := make(map[string]bool)
 	var usernames []string
 	for _, m := range matches {
-		u := m[1]
+		u := strings.ToLower(m[1])
 		if !seen[u] {
 			seen[u] = true
 			usernames = append(usernames, u)
@@ -115,7 +130,8 @@ func (s *commentService) extractAndResolveMentions(projectID string, content str
 		return nil, nil
 	}
 
-	resolved, _ := s.commentRepo.ResolveUsernames(projectID, usernames)
+	resolved, _ := s.commentRepo.ResolveUsernames(projectID, workspaceID, usernames)
+
 	var mentions []dto.MentionUser
 	var userIDs []string
 	for _, username := range usernames {
@@ -125,6 +141,58 @@ func (s *commentService) extractAndResolveMentions(projectID string, content str
 		}
 	}
 	return mentions, userIDs
+}
+
+func (s *commentService) getInterestedUsers(taskID string, excludeUserID string) ([]string, error) {
+	seen := make(map[string]bool)
+	if excludeUserID != "" {
+		seen[excludeUserID] = true
+	}
+	var result []string
+
+	task, err := s.taskRepo.GetByID(taskID)
+	if err == nil && task.CreatorID != nil && !seen[*task.CreatorID] {
+		seen[*task.CreatorID] = true
+		result = append(result, *task.CreatorID)
+	}
+
+	assignees, err := s.taskAssigneeRepo.ListByTaskID(taskID)
+	if err == nil {
+		for _, a := range assignees {
+			if !seen[a.UserID] {
+				seen[a.UserID] = true
+				result = append(result, a.UserID)
+			}
+		}
+	}
+
+	previous, err := s.commentRepo.ListPreviousCommenters(taskID, excludeUserID)
+	if err == nil {
+		for _, uid := range previous {
+			if !seen[uid] {
+				seen[uid] = true
+				result = append(result, uid)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (s *commentService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
+}
+
+func truncateContent(content string, maxLen int) string {
+	runes := []rune(content)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "..."
+	}
+	return content
 }
 
 func (s *commentService) ListComments(workspaceID string, userID string, projectID string, taskID string, limit int, cursor string, direction string) (*dto.CommentListResponse, error) {
@@ -155,11 +223,11 @@ func (s *commentService) ListComments(workspaceID string, userID string, project
 }
 
 func (s *commentService) CreateComment(workspaceID string, userID string, projectID string, taskID string, req *dto.CreateCommentRequest) (*dto.CommentCreateResponse, error) {
-	content := strings.TrimSpace(req.Content)
+	content := markdown.SanitizeInput(req.Content)
 	if content == "" {
 		return nil, apperror.ErrContentRequired
 	}
-	if len(content) > 10000 {
+	if len([]rune(content)) > 10000 {
 		return nil, apperror.ErrContentTooLong
 	}
 
@@ -171,7 +239,7 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		return nil, apperror.ErrProjectArchived
 	}
 
-	_, err = s.getTaskOrFail(projectID, taskID)
+	task, err := s.getTaskOrFail(projectID, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +253,7 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create comment")
 	}
 
-	mentions, mentionedIDs := s.extractAndResolveMentions(projectID, content)
+	mentions, mentionedIDs := s.extractAndResolveMentions(workspaceID, projectID, content)
 	for _, mid := range mentionedIDs {
 		_ = s.commentRepo.CreateMention(&models.CommentMention{
 			CommentID: comment.ID,
@@ -193,13 +261,87 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		})
 	}
 
-	html := renderCommentHTML(content, mentions)
+	mm := make([]markdown.MentionUser, len(mentions))
+	for i, m := range mentions {
+		mm[i] = markdown.MentionUser{UserID: m.UserID, Username: m.Username}
+	}
+	html := markdown.RenderToHTML(content, mm)
 
 	author := dto.CommentAuthor{
 		UserID:   userID,
 		FullName: "",
 		Username: "",
 	}
+
+	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+	actorName := s.getUserName(userID)
+
+	var mentionedNotified []string
+	for _, mid := range mentionedIDs {
+		if mid != userID {
+			mentionedNotified = append(mentionedNotified, mid)
+		}
+	}
+
+	if len(mentionedNotified) > 0 {
+		s.dispatcher.DispatchMENTIONED(&notif.MENTIONEDInput{
+			ActorID:      userID,
+			ActorName:    actorName,
+			RecipientIDs: mentionedNotified,
+			TaskRef:      taskRef,
+			TaskTitle:    task.Title,
+			CommentID:    comment.ID,
+			CommentBody:  content,
+			WorkspaceID:  workspaceID,
+			ProjectID:    projectID,
+			TaskID:       taskID,
+		})
+	}
+
+	interested, _ := s.getInterestedUsers(taskID, userID)
+	var commentedNotified []string
+	for _, uid := range interested {
+		found := false
+		for _, mid := range mentionedNotified {
+			if uid == mid {
+				found = true
+				break
+			}
+		}
+		if !found {
+			commentedNotified = append(commentedNotified, uid)
+		}
+	}
+
+	if len(commentedNotified) > 0 {
+		s.dispatcher.DispatchCOMMENTED(&notif.COMMENTEDInput{
+			ActorID:      userID,
+			ActorName:    actorName,
+			RecipientIDs: commentedNotified,
+			TaskRef:      taskRef,
+			TaskTitle:    task.Title,
+			CommentID:    comment.ID,
+			CommentBody:  content,
+			WorkspaceID:  workspaceID,
+			ProjectID:    projectID,
+			TaskID:       taskID,
+		})
+	}
+
+	metaJSON, _ := json.Marshal(map[string]interface{}{
+		"content_preview": truncateContent(content, 50),
+		"mention_count":   len(mentionedIDs),
+	})
+	metaStr := string(metaJSON)
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &workspaceID,
+		ProjectID:   &projectID,
+		UserID:      &userID,
+		Action:      models.ActivityActionCREATE,
+		EntityType:  models.EntityTypeCOMMENT,
+		EntityID:    comment.ID,
+		Metadata:    &metaStr,
+	})
 
 	return &dto.CommentCreateResponse{
 		ID:          comment.ID,
@@ -212,18 +354,18 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		CreatedAt:   comment.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   comment.UpdatedAt.Format(time.RFC3339),
 		NotificationsSent: &dto.NotificationsSent{
-			Mentioned: mentionedIDs,
-			Commented: nil,
+			Mentioned: mentionedNotified,
+			Commented: commentedNotified,
 		},
 	}, nil
 }
 
 func (s *commentService) UpdateComment(workspaceID string, userID string, projectID string, taskID string, commentID string, req *dto.UpdateCommentRequest) (*dto.CommentUpdateResponse, error) {
-	content := strings.TrimSpace(req.Content)
+	content := markdown.SanitizeInput(req.Content)
 	if content == "" {
 		return nil, apperror.ErrContentRequired
 	}
-	if len(content) > 10000 {
+	if len([]rune(content)) > 10000 {
 		return nil, apperror.ErrContentTooLong
 	}
 
@@ -235,7 +377,7 @@ func (s *commentService) UpdateComment(workspaceID string, userID string, projec
 		return nil, apperror.ErrProjectArchived
 	}
 
-	_, err = s.getTaskOrFail(projectID, taskID)
+	task, err := s.getTaskOrFail(projectID, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +404,7 @@ func (s *commentService) UpdateComment(workspaceID string, userID string, projec
 
 	_ = s.commentRepo.DeleteMentionsByCommentID(commentID)
 
-	newMentions, newMentionedIDs := s.extractAndResolveMentions(projectID, content)
+	newMentions, newMentionedIDs := s.extractAndResolveMentions(workspaceID, projectID, content)
 	for _, mid := range newMentionedIDs {
 		_ = s.commentRepo.CreateMention(&models.CommentMention{
 			CommentID: commentID,
@@ -272,7 +414,7 @@ func (s *commentService) UpdateComment(workspaceID string, userID string, projec
 
 	var newMentionsNotified []string
 	for _, mid := range newMentionedIDs {
-		if !oldMentionedIDs[mid] {
+		if !oldMentionedIDs[mid] && mid != userID {
 			newMentionsNotified = append(newMentionsNotified, mid)
 		}
 	}
@@ -283,12 +425,33 @@ func (s *commentService) UpdateComment(workspaceID string, userID string, projec
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update comment")
 	}
 
-	html := renderCommentHTML(content, newMentions)
+	mm := make([]markdown.MentionUser, len(newMentions))
+	for i, m := range newMentions {
+		mm[i] = markdown.MentionUser{UserID: m.UserID, Username: m.Username}
+	}
+	html := markdown.RenderToHTML(content, mm)
 
 	author := dto.CommentAuthor{
 		UserID:   userID,
 		FullName: "",
 		Username: "",
+	}
+
+	if len(newMentionsNotified) > 0 {
+		taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+		actorName := s.getUserName(userID)
+		s.dispatcher.DispatchMENTIONED(&notif.MENTIONEDInput{
+			ActorID:      userID,
+			ActorName:    actorName,
+			RecipientIDs: newMentionsNotified,
+			TaskRef:      taskRef,
+			TaskTitle:    task.Title,
+			CommentID:    commentID,
+			CommentBody:  content,
+			WorkspaceID:  workspaceID,
+			ProjectID:    projectID,
+			TaskID:       taskID,
+		})
 	}
 
 	return &dto.CommentUpdateResponse{
@@ -330,21 +493,25 @@ func (s *commentService) DeleteComment(workspaceID string, userID string, projec
 		return nil, apperror.ErrCommentNotFound
 	}
 
-	isOwner := comment.UserID != nil && *comment.UserID == userID
-	if !isOwner {
-		return nil, apperror.ErrForbidden
+	if err := s.canDeleteComment(workspaceID, projectID, userID, comment); err != nil {
+		return nil, err
 	}
-
-	deletedByOwner := !isOwner
 
 	if err := s.commentRepo.Delete(commentID); err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete comment")
 	}
 
 	return &dto.CommentDeleteResponse{
-		Message:          "Comment has been deleted.",
-		DeletedCommentID: commentID,
-		DeletedByOwner:   deletedByOwner,
+		ID:          commentID,
+		TaskID:      taskID,
+		IsDeleted:   true,
+		Content:     nil,
+		ContentHTML: nil,
+		Author:      nil,
+		Mentions:    []dto.MentionUser{},
+		IsEdited:    false,
+		CreatedAt:   comment.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   comment.UpdatedAt.Format(time.RFC3339),
 	}, nil
 }
 

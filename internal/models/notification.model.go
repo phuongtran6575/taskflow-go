@@ -44,3 +44,10 @@ type NotificationRecipient struct {
 }
 
 func (NotificationRecipient) TableName() string { return "notification_recipients" }
+
+type TaskDueNotification struct {
+	TaskID string    `gorm:"type:uuid;primaryKey"`
+	SentAt time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+}
+
+func (TaskDueNotification) TableName() string { return "task_due_notifications" }

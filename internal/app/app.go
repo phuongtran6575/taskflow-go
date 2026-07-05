@@ -1,10 +1,10 @@
 package app
 
 import (
-	"fmt"
 	"log"
 
 	"TaskFlow-Go/internal/database"
+	"TaskFlow-Go/internal/job"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +23,11 @@ func Run(addr ...string) {
 	// --- Container (DI) ---
 	container := NewContainer(db)
 
+	// --- Background Jobs ---
+	jobDispatcher := job.NewDispatcher(db)
+	jobDispatcher.StartDailyJobs()
+	jobDispatcher.StartTaskDueSoonCron()
+
 	// --- HTTP Server ---
 	r := gin.Default()
 	api := r.Group("/api/v1")
@@ -37,6 +42,4 @@ func Run(addr ...string) {
 	if err := r.Run(port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-
-	_ = fmt.Sprintf
 }

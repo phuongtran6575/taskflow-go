@@ -12,26 +12,36 @@ import (
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
 )
 
 type workspaceInviteService struct {
-	inviteRepo  repoInterface.WorkspaceInviteRepository
-	memberRepo  repoInterface.WorkspaceMemberRepository
-	workspaceRepo repoInterface.WorkspaceRepository
+	inviteRepo     repoInterface.WorkspaceInviteRepository
+	memberRepo     repoInterface.WorkspaceMemberRepository
+	workspaceRepo  repoInterface.WorkspaceRepository
+	notifRepo      repoInterface.NotificationRepository
+	userRepo       repoInterface.UserRepository
+	dispatcher     *notif.Dispatcher
 }
 
 func NewWorkspaceInviteService(
 	inviteRepo repoInterface.WorkspaceInviteRepository,
 	memberRepo repoInterface.WorkspaceMemberRepository,
 	workspaceRepo repoInterface.WorkspaceRepository,
+	notifRepo repoInterface.NotificationRepository,
+	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.WorkspaceInviteService {
 	return &workspaceInviteService{
 		inviteRepo:    inviteRepo,
 		memberRepo:    memberRepo,
 		workspaceRepo: workspaceRepo,
+		notifRepo:     notifRepo,
+		userRepo:      userRepo,
+		dispatcher:    dispatcher,
 	}
 }
 
@@ -206,6 +216,27 @@ func (s *workspaceInviteService) JoinWorkspaceByCode(code string, userID string)
 	if err := s.inviteRepo.IncrementUses(invite.ID); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to increment uses")
 	}
+
+	s.dispatcher.DispatchADDEDTOWORKSPACEForUser(&notif.ADDEDTOWORKSPACEForUserInput{
+		RecipientID:   userID,
+		WorkspaceName: workspace.Name,
+		Role:          role,
+		WorkspaceID:   workspace.ID,
+	})
+
+	adminIDs, _ := s.notifRepo.GetWorkspaceMemberIDsByRoles(workspace.ID, []string{"OWNER", "ADMIN"})
+	user, _ := s.userRepo.GetByID(userID)
+	userName := userID
+	if user != nil {
+		userName = user.FullName
+	}
+	s.dispatcher.DispatchADDEDTOWORKSPACEForAdmin(&notif.ADDEDTOWORKSPACEForAdminInput{
+		AdminIDs:      adminIDs,
+		UserName:      userName,
+		WorkspaceName: workspace.Name,
+		Role:          role,
+		WorkspaceID:   workspace.ID,
+	})
 
 	return &dto.JoinWorkspaceResponse{
 		Message: "You have successfully joined the workspace.",

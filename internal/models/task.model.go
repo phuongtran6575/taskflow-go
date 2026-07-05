@@ -59,15 +59,16 @@ type TaskAssignee struct {
 func (TaskAssignee) TableName() string { return "task_assignees" }
 
 type Attachment struct {
-	ID         string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	TaskID     string         `gorm:"type:uuid;not null"`
-	UploaderID *string        `gorm:"type:uuid"`
-	FileName   string         `gorm:"type:varchar(255);not null"`
-	FileURL    string         `gorm:"type:text;not null"`
-	FileType   string         `gorm:"type:varchar(50);not null"`
-	SizeBytes  int64          `gorm:"type:bigint;not null"`
-	CreatedAt  time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	DeletedAt  gorm.DeletedAt
+	ID                string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	TaskID            string         `gorm:"type:uuid;not null"`
+	UploaderID        *string        `gorm:"type:uuid"`
+	FileName          string         `gorm:"type:varchar(255);not null"`
+	FileURL           string         `gorm:"type:text;not null"`
+	FileType          string         `gorm:"type:varchar(50);not null"`
+	SizeBytes         int64          `gorm:"type:bigint;not null"`
+	CreatedAt         time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	DeletedAt         gorm.DeletedAt
+	ScheduledDeleteAt *time.Time    `gorm:"type:timestamp"`
 
 	Task     Task  `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE"`
 	Uploader *User `gorm:"foreignKey:UploaderID;constraint:OnDelete:SET NULL"`

@@ -90,6 +90,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.RolePermission{},
 		&models.Notification{},
 		&models.NotificationRecipient{},
+		&models.TaskDueNotification{},
 		&models.Session{},
 		&models.ActivityLog{},
 	)

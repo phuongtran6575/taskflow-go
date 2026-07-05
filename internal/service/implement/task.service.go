@@ -12,6 +12,7 @@ import (
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -29,6 +30,8 @@ type taskService struct {
 	workspaceRepo     repoInterface.WorkspaceRepository
 	activityLogRepo   repoInterface.ActivityLogRepository
 	notifRepo         repoInterface.NotificationRepository
+	userRepo          repoInterface.UserRepository
+	dispatcher        *notif.Dispatcher
 }
 
 func NewTaskService(
@@ -43,6 +46,8 @@ func NewTaskService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
 	notifRepo repoInterface.NotificationRepository,
+	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.TaskService {
 	return &taskService{
 		tm:                tm,
@@ -56,6 +61,8 @@ func NewTaskService(
 		workspaceRepo:     workspaceRepo,
 		activityLogRepo:   activityLogRepo,
 		notifRepo:         notifRepo,
+		userRepo:          userRepo,
+		dispatcher:        dispatcher,
 	}
 }
 
@@ -104,22 +111,12 @@ func (s *taskService) logActivity(workspaceID, projectID, userID, entityID strin
 	})
 }
 
-func (s *taskService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
-	now := time.Now()
-	ref := &referenceURL
-	if referenceURL == "" {
-		ref = nil
+func (s *taskService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
 	}
-	contentPtr := &content
-	notification := &models.Notification{
-		ActorID:      &actorID,
-		Type:         notifType,
-		Title:        title,
-		Content:      contentPtr,
-		ReferenceURL: ref,
-		CreatedAt:    now,
-	}
-	_ = s.notifRepo.Create(notification, []string{recipientID})
+	return u.FullName
 }
 
 func (s *taskService) dedupStrings(items []string) []string {
@@ -439,20 +436,21 @@ func (s *taskService) CreateTask(workspaceID string, userID string, projectID st
 		"column_id":   task.ColumnID,
 	})
 
+	taskRef := s.dispatcher.FormatTaskRef(resp.Column.Title, task.TaskNumber)
+	actorName := s.getUserName(userID)
 	for _, aid := range validAssigneeIDs {
-		if aid == userID {
-			continue
-		}
-		taskRef := fmt.Sprintf("%s-%d", resp.Column.Title, task.TaskNumber)
-		dueText := "Không có deadline"
-		if task.DueDate != nil {
-			dueText = task.DueDate.Format("2006-01-02 15:04")
-		}
-		s.sendNotification(aid, userID, models.NotificationTypeASSIGNED,
-			fmt.Sprintf("Bạn được giao task %s: %s", taskRef, task.Title),
-			fmt.Sprintf("Trong project %s bởi %s. Hạn: %s.", projectID, userID, dueText),
-			fmt.Sprintf("/tasks/%s", task.ID),
-		)
+		s.dispatcher.DispatchASSIGNED(&notif.ASSIGNEDInput{
+			ActorID:     userID,
+			ActorName:   actorName,
+			RecipientID: aid,
+			TaskRef:     taskRef,
+			TaskTitle:   task.Title,
+			ProjectName: projectID,
+			DueDate:     task.DueDate,
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+			TaskID:      task.ID,
+		})
 	}
 
 	return resp, nil

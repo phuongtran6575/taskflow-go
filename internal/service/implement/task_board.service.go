@@ -12,6 +12,7 @@ import (
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -28,6 +29,7 @@ type taskBoardService struct {
 	activityLogRepo   repoInterface.ActivityLogRepository
 	notifRepo         repoInterface.NotificationRepository
 	userRepo          repoInterface.UserRepository
+	dispatcher        *notif.Dispatcher
 }
 
 func NewTaskBoardService(
@@ -41,6 +43,7 @@ func NewTaskBoardService(
 	activityLogRepo repoInterface.ActivityLogRepository,
 	notifRepo repoInterface.NotificationRepository,
 	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.TaskBoardService {
 	return &taskBoardService{
 		tm:                tm,
@@ -53,6 +56,7 @@ func NewTaskBoardService(
 		activityLogRepo:   activityLogRepo,
 		notifRepo:         notifRepo,
 		userRepo:          userRepo,
+		dispatcher:        dispatcher,
 	}
 }
 
@@ -402,27 +406,20 @@ func (s *taskBoardService) sendStatusChangeNotification(taskID, actorID string, 
 
 	recipientIDs := make([]string, 0, len(assignees))
 	for _, a := range assignees {
-		if a.UserID != actorID {
-			recipientIDs = append(recipientIDs, a.UserID)
-		}
-	}
-	if len(recipientIDs) == 0 {
-		return
+		recipientIDs = append(recipientIDs, a.UserID)
 	}
 
 	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
-	title := fmt.Sprintf("%s: %s đã chuyển sang %s", taskRef, task.Title, newCol.Title)
-	content := fmt.Sprintf("Task được chuyển từ %s sang %s bởi %s.", oldCol.Title, newCol.Title, actor.FullName)
-	refURL := fmt.Sprintf("/workspaces/%s/projects/%s/tasks/%s", project.WorkspaceID, project.ID, taskID)
-
-	now := time.Now()
-	notification := &models.Notification{
-		ActorID:      &actorID,
-		Type:         models.NotificationTypeSTATUSCHANGED,
-		Title:        title,
-		Content:      &content,
-		ReferenceURL: &refURL,
-		CreatedAt:    now,
-	}
-	_ = s.notifRepo.Create(notification, recipientIDs)
+	s.dispatcher.DispatchSTATUSCHANGED(&notif.STATUSCHANGEDInput{
+		ActorID:      actorID,
+		ActorName:    actor.FullName,
+		RecipientIDs: recipientIDs,
+		TaskRef:      taskRef,
+		TaskTitle:    task.Title,
+		OldColumn:    oldCol.Title,
+		NewColumn:    newCol.Title,
+		WorkspaceID:  project.WorkspaceID,
+		ProjectID:    project.ID,
+		TaskID:       taskID,
+	})
 }

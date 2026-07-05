@@ -17,5 +17,7 @@ type CommentRepository interface {
 	CreateMention(mention *models.CommentMention) error
 	DeleteMentionsByCommentID(commentID string) error
 	GetMentionsByCommentID(commentID string) ([]models.CommentMention, error)
-	ResolveUsernames(projectID string, usernames []string) (map[string]dto.MentionUser, error)
+	ResolveUsernames(projectID string, workspaceID string, usernames []string) (map[string]dto.MentionUser, error)
+
+	ListPreviousCommenters(taskID string, excludeUserID string) ([]string, error)
 }

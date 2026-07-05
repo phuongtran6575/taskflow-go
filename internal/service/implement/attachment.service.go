@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,20 +24,17 @@ import (
 )
 
 const (
-	maxFileSize    = 50 * 1024 * 1024
-	maxBatchSize   = 10
+	maxFileSize  = 50 * 1024 * 1024
+	maxBatchSize = 10
 )
 
-var blockedExtensions = map[string]bool{
-	"exe": true, "sh": true, "bat": true, "cmd": true,
-	"dmg": true, "apk": true, "msix": true, "scr": true, "com": true, "vbs": true,
-}
-
 type attachmentService struct {
-	attachmentRepo repoInterface.AttachmentRepository
-	taskRepo       repoInterface.TaskRepository
-	projectRepo    repoInterface.ProjectRepository
-	workspaceRepo  repoInterface.WorkspaceRepository
+	attachmentRepo    repoInterface.AttachmentRepository
+	taskRepo          repoInterface.TaskRepository
+	projectRepo       repoInterface.ProjectRepository
+	workspaceRepo     repoInterface.WorkspaceRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
+	projectMemberRepo repoInterface.ProjectMemberRepository
 }
 
 func NewAttachmentService(
@@ -44,12 +42,16 @@ func NewAttachmentService(
 	taskRepo repoInterface.TaskRepository,
 	projectRepo repoInterface.ProjectRepository,
 	workspaceRepo repoInterface.WorkspaceRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
+	projectMemberRepo repoInterface.ProjectMemberRepository,
 ) _interface.AttachmentService {
 	return &attachmentService{
-		attachmentRepo: attachmentRepo,
-		taskRepo:       taskRepo,
-		projectRepo:    projectRepo,
-		workspaceRepo:  workspaceRepo,
+		attachmentRepo:    attachmentRepo,
+		taskRepo:          taskRepo,
+		projectRepo:       projectRepo,
+		workspaceRepo:     workspaceRepo,
+		activityLogRepo:   activityLogRepo,
+		projectMemberRepo: projectMemberRepo,
 	}
 }
 
@@ -61,10 +63,7 @@ func (s *attachmentService) getProjectOrFail(workspaceID, projectID string) (*mo
 		}
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get project")
 	}
-	if project.WorkspaceID != workspaceID {
-		return nil, apperror.ErrProjectNotFound
-	}
-	if project.DeletedAt.Valid {
+	if project.WorkspaceID != workspaceID || project.DeletedAt.Valid {
 		return nil, apperror.ErrProjectNotFound
 	}
 	return project, nil
@@ -98,10 +97,10 @@ func (s *attachmentService) getAttachmentOrFail(taskID, attachmentID string) (*m
 	return att, nil
 }
 
-func (s *attachmentService) ListAttachments(workspaceID string, userID string, projectID string, taskID string, fileType string, page int, pageSize int) (*dto.AttachmentListResponse, error) {
+func (s *attachmentService) ListAttachments(workspaceID string, userID string, projectID string, taskID string, fileType string, page int, limit int) (*dto.AttachmentListResponse, error) {
 	page = max(page, 1)
-	if pageSize <= 0 {
-		pageSize = 20
+	if limit <= 0 {
+		limit = 20
 	}
 
 	_, err := s.getProjectOrFail(workspaceID, projectID)
@@ -113,7 +112,7 @@ func (s *attachmentService) ListAttachments(workspaceID string, userID string, p
 		return nil, err
 	}
 
-	result, err := s.attachmentRepo.ListByTaskIDWithPagination(taskID, fileType, page, pageSize)
+	result, err := s.attachmentRepo.ListByTaskIDWithPagination(taskID, fileType, page, limit)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrTaskNotFound
@@ -146,26 +145,19 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 		return nil, apperror.ErrWorkspaceNotFound
 	}
 
-	storageUsage, err := s.attachmentRepo.GetStorageUsageByWorkspace(workspaceID)
-	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check storage")
+	var validFiles []struct {
+		header *multipart.FileHeader
+		ext    string
+		sanitizedName string
 	}
-	usedBytes := int64(0)
-	for _, p := range storageUsage.BreakdownByProject {
-		usedBytes += p.UsedBytes
-	}
-	if err := helper.CheckStorageLimit(workspace.Plan, usedBytes, 0); err != nil {
-		return nil, err
-	}
-
-	var uploaded []dto.UploadedFileInfo
-	var failed []dto.FailedFile
-	totalSizeNew := int64(0)
+	var totalValidSize int64
+	var preFailed []dto.FailedFile
 
 	for _, fh := range files {
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fh.Filename), "."))
-		if blockedExtensions[ext] {
-			failed = append(failed, dto.FailedFile{
+
+		if helper.IsBlockedExtension(ext) {
+			preFailed = append(preFailed, dto.FailedFile{
 				FileName: fh.Filename,
 				Reason:   "BLOCKED_FILE_TYPE",
 				Message:  fmt.Sprintf("File type .%s is not allowed.", ext),
@@ -174,7 +166,7 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 		}
 
 		if fh.Size > maxFileSize {
-			failed = append(failed, dto.FailedFile{
+			preFailed = append(preFailed, dto.FailedFile{
 				FileName: fh.Filename,
 				Reason:   "FILE_TOO_LARGE",
 				Message:  "File exceeds 50MB limit.",
@@ -182,45 +174,57 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 			continue
 		}
 
-		if err := helper.CheckStorageLimit(workspace.Plan, usedBytes, totalSizeNew+fh.Size); err != nil {
-			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
-				Reason:   "STORAGE_QUOTA_EXCEEDED",
-				Message:  "Workspace storage quota exceeded.",
-			})
-			continue
-		}
+		sanitized := helper.SanitizeFileName(fh.Filename)
 
-		attachment := models.Attachment{
-			TaskID:     taskID,
-			UploaderID: &userID,
-			FileName:   fh.Filename,
-			FileType:   ext,
-			SizeBytes:  fh.Size,
-		}
-		if err := s.attachmentRepo.Create(&attachment); err != nil {
-			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
-				Reason:   "UPLOAD_FAILED",
-				Message:  "Failed to save attachment.",
-			})
-			continue
-		}
+		validFiles = append(validFiles, struct {
+			header        *multipart.FileHeader
+			ext           string
+			sanitizedName string
+		}{header: fh, ext: ext, sanitizedName: sanitized})
+		totalValidSize += fh.Size
+	}
 
-		savePath := filepath.Join(".", "uploads", workspaceID, taskID, attachment.ID+"."+ext)
+	storageUsage, err := s.attachmentRepo.GetStorageUsageByWorkspace(workspaceID)
+	if err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check storage")
+	}
+	usedBytes := int64(0)
+	for _, p := range storageUsage.BreakdownByProject {
+		usedBytes += p.UsedBytes
+	}
+
+	if len(validFiles) > 0 {
+		if err := helper.CheckStorageLimit(workspace.Plan, usedBytes, totalValidSize); err != nil {
+			return nil, apperror.NewAppError(
+				http.StatusInsufficientStorage,
+				"STORAGE_QUOTA_EXCEEDED",
+				fmt.Sprintf("Workspace storage quota exceeded. Need %s more.",
+					helper.FormatSizeDisplay((usedBytes+totalValidSize)-helper.GetPlanLimits(workspace.Plan).MaxStorageBytes)),
+			)
+		}
+	}
+
+	var uploaded []dto.UploadedFileInfo
+	var failed []dto.FailedFile
+	failed = append(failed, preFailed...)
+
+	for _, vf := range validFiles {
+		attID := uuid.New().String()
+		savePath := filepath.Join(".", "attachments", workspaceID, projectID, taskID, attID+"."+vf.ext)
+
 		if err := os.MkdirAll(filepath.Dir(savePath), 0755); err != nil {
 			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
+				FileName: vf.header.Filename,
 				Reason:   "UPLOAD_FAILED",
 				Message:  "Failed to create upload directory.",
 			})
 			continue
 		}
 
-		src, err := fh.Open()
+		src, err := vf.header.Open()
 		if err != nil {
 			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
+				FileName: vf.header.Filename,
 				Reason:   "UPLOAD_FAILED",
 				Message:  "Failed to read file.",
 			})
@@ -231,7 +235,7 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 		if err != nil {
 			src.Close()
 			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
+				FileName: vf.header.Filename,
 				Reason:   "UPLOAD_FAILED",
 				Message:  "Failed to save file.",
 			})
@@ -244,42 +248,86 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 
 		if copyErr != nil {
 			failed = append(failed, dto.FailedFile{
-				FileName: fh.Filename,
+				FileName: vf.header.Filename,
 				Reason:   "UPLOAD_FAILED",
 				Message:  "Failed to write file.",
 			})
+			os.Remove(savePath)
 			continue
 		}
 
-		attachment.FileURL = savePath
-		_ = s.attachmentRepo.Create(&attachment)
+		now := time.Now()
+		attachment := models.Attachment{
+			ID:        attID,
+			TaskID:    taskID,
+			UploaderID: &userID,
+			FileName:  vf.sanitizedName,
+			FileURL:   savePath,
+			FileType:  vf.ext,
+			SizeBytes: vf.header.Size,
+			CreatedAt: now,
+		}
+		if err := s.attachmentRepo.Create(&attachment); err != nil {
+			failed = append(failed, dto.FailedFile{
+				FileName: vf.header.Filename,
+				Reason:   "UPLOAD_FAILED",
+				Message:  "Failed to save attachment record.",
+			})
+			os.Remove(savePath)
+			continue
+		}
 
-		fileGroup := classifyFileType(ext)
+		fileGroup := helper.ClassifyFileType(vf.ext)
 		var thumbnailURL *string
 		if fileGroup == "image" {
-			url := fmt.Sprintf("/thumbnails/%s.webp", attachment.ID)
+			url := fmt.Sprintf("/api/v1/files/%s/thumbnail", attID)
 			thumbnailURL = &url
 		}
 
 		uploaded = append(uploaded, dto.UploadedFileInfo{
-			ID:        attachment.ID,
-			FileName:  fh.Filename,
-			FileType:  ext,
+			ID:        attID,
+			FileName:  vf.sanitizedName,
+			FileType:  vf.ext,
 			FileGroup: fileGroup,
-			SizeBytes: fh.Size,
-			SizeDisplay: formatSizeDisplay(fh.Size),
+			SizeBytes: vf.header.Size,
+			SizeDisplay: helper.FormatSizeDisplay(vf.header.Size),
 			ThumbnailURL: thumbnailURL,
 			Uploader: dto.AttachmentUploader{
 				UserID:   userID,
 				FullName: "",
 			},
-			CreatedAt: attachment.CreatedAt.Format(time.RFC3339),
+			CreatedAt: now.Format(time.RFC3339),
 		})
-		totalSizeNew += fh.Size
 	}
 
-	_ = uuid.New()
 	ref := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+
+	if len(uploaded) > 0 {
+		var fileInfos []map[string]interface{}
+		for _, u := range uploaded {
+			fileInfos = append(fileInfos, map[string]interface{}{
+				"file_name":  u.FileName,
+				"size_bytes": u.SizeBytes,
+				"file_type":  u.FileType,
+			})
+		}
+		meta := map[string]interface{}{
+			"event":           "attachments_uploaded",
+			"files":           fileInfos,
+			"total_size_bytes": totalValidSize,
+		}
+		metaBytes, _ := json.Marshal(meta)
+		metaStr := string(metaBytes)
+		s.activityLogRepo.Create(&models.ActivityLog{
+			WorkspaceID: &workspaceID,
+			ProjectID:   &projectID,
+			UserID:      &userID,
+			Action:      models.ActivityActionCREATE,
+			EntityType:  models.EntityTypeTASK,
+			EntityID:    taskID,
+			Metadata:    &metaStr,
+		})
+	}
 
 	return &dto.UploadAttachmentsResponse{
 		TaskID:        taskID,
@@ -327,14 +375,14 @@ func (s *attachmentService) GetPreviewUrl(workspaceID string, userID string, pro
 	}
 
 	expiresIn := 900
-	fileGroup := classifyFileType(att.FileType)
+	fileGroup := helper.ClassifyFileType(att.FileType)
 	isPreviewable := fileGroup == "image" || att.FileType == "pdf"
 
 	previewURL := fmt.Sprintf("/api/v1/files/%s?disposition=inline&expires=%d", attachmentID, time.Now().Add(time.Duration(expiresIn)*time.Second).Unix())
 
 	thumbnailURL := ""
 	if fileGroup == "image" {
-		thumbnailURL = fmt.Sprintf("/thumbnails/%s.webp", attachmentID)
+		thumbnailURL = fmt.Sprintf("/api/v1/files/%s/thumbnail", attachmentID)
 	}
 
 	return &dto.PreviewUrlResponse{
@@ -362,15 +410,33 @@ func (s *attachmentService) DeleteAttachment(workspaceID string, userID string, 
 		return nil, err
 	}
 
-	if att.UploaderID != nil && *att.UploaderID != userID {
-		return nil, apperror.ErrForbidden
-	}
-
-	if err := s.attachmentRepo.Delete(attachmentID); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete attachment")
+	if err := s.canDeleteAttachment(workspaceID, projectID, userID, att); err != nil {
+		return nil, err
 	}
 
 	scheduledAt := time.Now().Add(30 * 24 * time.Hour)
+	if err := s.attachmentRepo.SoftDelete(attachmentID, scheduledAt); err != nil {
+		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete attachment")
+	}
+
+	isOwn := att.UploaderID != nil && *att.UploaderID == userID
+	meta := map[string]interface{}{
+		"event":       "attachment_deleted",
+		"file_name":   att.FileName,
+		"size_bytes":  att.SizeBytes,
+		"deleted_own": isOwn,
+	}
+	metaBytes, _ := json.Marshal(meta)
+	metaStr := string(metaBytes)
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID: &workspaceID,
+		ProjectID:   &projectID,
+		UserID:      &userID,
+		Action:      models.ActivityActionDELETE,
+		EntityType:  models.EntityTypeTASK,
+		EntityID:    taskID,
+		Metadata:    &metaStr,
+	})
 
 	return &dto.DeleteAttachmentResponse{
 		Message:                   fmt.Sprintf("Attachment '%s' has been deleted.", att.FileName),
@@ -379,33 +445,31 @@ func (s *attachmentService) DeleteAttachment(workspaceID string, userID string, 
 	}, nil
 }
 
-func classifyFileType(ext string) string {
-	imageTypes := map[string]bool{"jpg": true, "jpeg": true, "png": true, "gif": true, "webp": true, "svg": true}
-	documentTypes := map[string]bool{"pdf": true, "doc": true, "docx": true, "xls": true, "xlsx": true, "txt": true, "csv": true, "ppt": true, "pptx": true}
-	videoTypes := map[string]bool{"mp4": true, "mov": true, "avi": true, "mkv": true, "webm": true}
-	if imageTypes[ext] {
-		return "image"
+func (s *attachmentService) canDeleteAttachment(workspaceID, projectID, userID string, att *models.Attachment) error {
+	ws, err := s.workspaceRepo.GetByID(workspaceID)
+	if err == nil && ws.OwnerID == userID {
+		return nil
 	}
-	if documentTypes[ext] {
-		return "document"
+
+	isUploader := att.UploaderID != nil && *att.UploaderID == userID
+
+	if isUploader {
+		hasPerm, err := s.projectMemberRepo.HasPermission(projectID, userID, "attachment:delete_own")
+		if err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check permission")
+		}
+		if hasPerm {
+			return nil
+		}
 	}
-	if videoTypes[ext] {
-		return "video"
+
+	hasAny, err := s.projectMemberRepo.HasPermission(projectID, userID, "attachment:delete_any")
+	if err != nil {
+		return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to check permission")
 	}
-	return "other"
+	if hasAny {
+		return nil
+	}
+
+	return apperror.ErrForbidden
 }
-
-func formatSizeDisplay(bytes int64) string {
-	if bytes < 1024 {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	if bytes < 1024*1024 {
-		return fmt.Sprintf("%.0f KB", float64(bytes)/1024)
-	}
-	if bytes < 1024*1024*1024 {
-		return fmt.Sprintf("%.0f MB", float64(bytes)/(1024*1024))
-	}
-	return fmt.Sprintf("%.0f GB", float64(bytes)/(1024*1024*1024))
-}
-
-

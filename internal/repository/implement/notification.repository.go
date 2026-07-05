@@ -221,3 +221,100 @@ func (r *notificationRepository) GetWorkspaceMemberIDsByRoles(workspaceID string
 		Pluck("user_id", &ids).Error
 	return ids, err
 }
+
+func (r *notificationRepository) FindUnreadCOMMENTEDByTask(taskID, recipientID string, since time.Time) (*models.Notification, error) {
+	var n models.Notification
+	pattern := "%/tasks/" + taskID + "%"
+	err := r.db.Raw(`
+		SELECT n.* FROM notifications n
+		JOIN notification_recipients nr ON nr.notification_id = n.id
+		WHERE n.type = ?
+		AND n.reference_url LIKE ?
+		AND nr.recipient_id = ?
+		AND nr.is_read = false
+		AND n.created_at >= ?
+		ORDER BY n.created_at DESC
+		LIMIT 1
+	`, models.NotificationTypeCOMMENTED, pattern, recipientID, since).Scan(&n).Error
+	if err != nil {
+		return nil, err
+	}
+	if n.ID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &n, nil
+}
+
+func (r *notificationRepository) UpdateNotification(id string, title, content string) error {
+	return r.db.Model(&models.Notification{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"title":      title,
+			"content":    content,
+			"created_at": gorm.Expr("NOW()"),
+		}).Error
+}
+
+func (r *notificationRepository) CreateWithRecipients(notification *models.Notification, recipients []string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(notification).Error; err != nil {
+			return err
+		}
+		for _, recipientID := range recipients {
+			nr := models.NotificationRecipient{
+				NotificationID: notification.ID,
+				RecipientID:    recipientID,
+			}
+			if err := tx.Create(&nr).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *notificationRepository) FindTaskDueNotification(taskID string) (*models.TaskDueNotification, error) {
+	var tdn models.TaskDueNotification
+	err := r.db.Where("task_id = ?", taskID).First(&tdn).Error
+	return &tdn, err
+}
+
+func (r *notificationRepository) CreateTaskDueNotification(tdn *models.TaskDueNotification) error {
+	return r.db.Create(tdn).Error
+}
+
+func (r *notificationRepository) DeleteTaskDueNotification(taskID string) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&models.TaskDueNotification{}).Error
+}
+
+func (r *notificationRepository) DeleteOldNotifications(before time.Time) (int64, error) {
+	result := r.db.Exec(`
+		DELETE FROM notification_recipients nr
+		USING notifications n
+		WHERE n.id = nr.notification_id
+		AND n.created_at < ?
+	`, before)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+func (r *notificationRepository) DeleteOrphanNotifications() (int64, error) {
+	result := r.db.Exec(`
+		DELETE FROM notifications n
+		WHERE NOT EXISTS (
+			SELECT 1 FROM notification_recipients
+			WHERE notification_id = n.id
+		)
+	`)
+	return result.RowsAffected, result.Error
+}
+
+func (r *notificationRepository) IsUserProjectMember(projectID, userID string) (bool, error) {
+	var count int64
+	err := r.db.Table("project_members").
+		Where("project_id = ? AND user_id = ?", projectID, userID).
+		Count(&count).Error
+	return count > 0, err
+}

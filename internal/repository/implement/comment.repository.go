@@ -2,21 +2,14 @@ package implement
 
 import (
 	"encoding/base64"
-	"fmt"
-	"regexp"
 	"time"
 
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/markdown"
 	"TaskFlow-Go/internal/models"
 	_interface "TaskFlow-Go/internal/repository/interface"
-)
-
-var (
-	mentionRe    = regexp.MustCompile(`@(\w+)`)
-	urlRe        = regexp.MustCompile(`https?://[^\s<>"]+|www\.[^\s<>"]+`)
-	hasHTTPPrefix = regexp.MustCompile(`^https?://`)
 )
 
 type commentRepository struct{ db *gorm.DB }
@@ -153,7 +146,11 @@ func (r *commentRepository) ListByTaskIDWithCursor(taskID string, limit int, cur
 		if !isDeleted {
 			c := row.Content
 			content = &c
-			html := renderCommentHTML(row.Content, mentionMap[row.ID])
+			mm := make([]markdown.MentionUser, len(mentionMap[row.ID]))
+			for j, m := range mentionMap[row.ID] {
+				mm[j] = markdown.MentionUser{UserID: m.UserID, Username: m.Username}
+			}
+			html := markdown.RenderToHTML(row.Content, mm)
 			contentHTML = &html
 			if row.AuthorID != nil {
 				author = &dto.CommentAuthor{
@@ -251,7 +248,21 @@ func (r *commentRepository) GetMentionsByCommentID(commentID string) ([]models.C
 	return ms, err
 }
 
-func (r *commentRepository) ResolveUsernames(projectID string, usernames []string) (map[string]dto.MentionUser, error) {
+func (r *commentRepository) ListPreviousCommenters(taskID string, excludeUserID string) ([]string, error) {
+	var userIDs []string
+	query := r.db.Table("comments").
+		Select("DISTINCT user_id").
+		Where("task_id = ? AND deleted_at IS NULL", taskID)
+	if excludeUserID != "" {
+		query = query.Where("user_id != ?", excludeUserID)
+	}
+	if err := query.Pluck("user_id", &userIDs).Error; err != nil {
+		return nil, err
+	}
+	return userIDs, nil
+}
+
+func (r *commentRepository) ResolveUsernames(projectID string, workspaceID string, usernames []string) (map[string]dto.MentionUser, error) {
 	if len(usernames) == 0 {
 		return map[string]dto.MentionUser{}, nil
 	}
@@ -261,10 +272,13 @@ func (r *commentRepository) ResolveUsernames(projectID string, usernames []strin
 		FullName string `gorm:"column:full_name"`
 	}
 	var rows []row
-	err := r.db.Table("project_members pm").
+	err := r.db.Table("users u").
 		Select("u.id as user_id, u.username, u.full_name").
-		Joins("JOIN users u ON u.id = pm.user_id").
-		Where("pm.project_id = ? AND u.username IN ?", projectID, usernames).
+		Where("u.username IN ? AND u.deleted_at IS NULL AND u.is_active = true", usernames).
+		Where(`
+			EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ? AND pm.user_id = u.id)
+			OR u.id = (SELECT w.owner_id FROM workspaces w WHERE w.id = ?)
+		`, projectID, workspaceID).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -278,27 +292,4 @@ func (r *commentRepository) ResolveUsernames(projectID string, usernames []strin
 	return result, nil
 }
 
-func renderCommentHTML(content string, mentions []dto.MentionUser) string {
-	mentionMap := make(map[string]string)
-	for _, m := range mentions {
-		mentionMap[m.Username] = m.UserID
-	}
 
-	result := content
-	result = mentionRe.ReplaceAllStringFunc(result, func(match string) string {
-		username := match[1:]
-		if uid, ok := mentionMap[username]; ok {
-			return fmt.Sprintf(`<span class="mention" data-user-id="%s">%s</span>`, uid, match)
-		}
-		return match
-	})
-	result = urlRe.ReplaceAllStringFunc(result, func(match string) string {
-		href := match
-		if !hasHTTPPrefix.MatchString(match) {
-			href = "https://" + match
-		}
-		return fmt.Sprintf(`<a href="%s">%s</a>`, href, match)
-	})
-
-	return "<p>" + result + "</p>"
-}

@@ -11,6 +11,7 @@ import (
 
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -24,6 +25,8 @@ type taskAssigneeService struct {
 	workspaceRepo     repoInterface.WorkspaceRepository
 	notifRepo         repoInterface.NotificationRepository
 	activityLogRepo   repoInterface.ActivityLogRepository
+	userRepo          repoInterface.UserRepository
+	dispatcher        *notif.Dispatcher
 }
 
 func NewTaskAssigneeService(
@@ -34,6 +37,8 @@ func NewTaskAssigneeService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	notifRepo repoInterface.NotificationRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.TaskAssigneeService {
 	return &taskAssigneeService{
 		taskRepo:          taskRepo,
@@ -43,6 +48,8 @@ func NewTaskAssigneeService(
 		workspaceRepo:     workspaceRepo,
 		notifRepo:         notifRepo,
 		activityLogRepo:   activityLogRepo,
+		userRepo:          userRepo,
+		dispatcher:        dispatcher,
 	}
 }
 
@@ -92,22 +99,12 @@ func (s *taskAssigneeService) getWorkspaceOwner(workspaceID string) (string, err
 	return ws.OwnerID, nil
 }
 
-func (s *taskAssigneeService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
-	now := time.Now()
-	ref := &referenceURL
-	if referenceURL == "" {
-		ref = nil
+func (s *taskAssigneeService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
 	}
-	contentPtr := &content
-	notification := &models.Notification{
-		ActorID:      &actorID,
-		Type:         notifType,
-		Title:        title,
-		Content:      contentPtr,
-		ReferenceURL: ref,
-		CreatedAt:    now,
-	}
-	_ = s.notifRepo.Create(notification, []string{recipientID})
+	return u.FullName
 }
 
 func (s *taskAssigneeService) dedupStrings(items []string) []string {
@@ -310,20 +307,20 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 
 	// BR-ASSIGN-05: Gửi notification riêng cho từng assignee mới (trừ self)
 	taskRef := s.getTaskRef(task, project)
-	dueText := "Không có deadline"
-	if task.DueDate != nil {
-		dueText = task.DueDate.Format("2006-01-02 15:04")
-	}
-	refURL := fmt.Sprintf("/workspaces/%s/projects/%s/tasks/%s", workspaceID, projectID, taskID)
+	actorName := s.getUserName(userID)
 	for _, aid := range addedIDs {
-		if aid == userID {
-			continue
-		}
-		s.sendNotification(aid, userID, models.NotificationTypeASSIGNED,
-			fmt.Sprintf("Bạn được giao task %s: %s", taskRef, task.Title),
-			fmt.Sprintf("Trong project %s bởi %s. Hạn: %s.", project.Name, infoMap[aid].FullName, dueText),
-			refURL,
-		)
+		s.dispatcher.DispatchASSIGNED(&notif.ASSIGNEDInput{
+			ActorID:     userID,
+			ActorName:   actorName,
+			RecipientID: aid,
+			TaskRef:     taskRef,
+			TaskTitle:   task.Title,
+			ProjectName: project.Name,
+			DueDate:     task.DueDate,
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+			TaskID:      taskID,
+		})
 	}
 
 	// BR-ASSIGN-06: Activity log

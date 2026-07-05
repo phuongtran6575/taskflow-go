@@ -11,6 +11,7 @@ import (
 
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -24,6 +25,8 @@ type projectMemberService struct {
 	roleRepo           repoInterface.RoleRepository
 	notifRepo          repoInterface.NotificationRepository
 	activityLogRepo    repoInterface.ActivityLogRepository
+	userRepo           repoInterface.UserRepository
+	dispatcher         *notif.Dispatcher
 }
 
 func NewProjectMemberService(
@@ -34,6 +37,8 @@ func NewProjectMemberService(
 	roleRepo repoInterface.RoleRepository,
 	notifRepo repoInterface.NotificationRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
+	dispatcher *notif.Dispatcher,
 ) _interface.ProjectMemberService {
 	return &projectMemberService{
 		memberRepo:      memberRepo,
@@ -43,6 +48,8 @@ func NewProjectMemberService(
 		roleRepo:        roleRepo,
 		notifRepo:       notifRepo,
 		activityLogRepo: activityLogRepo,
+		userRepo:        userRepo,
+		dispatcher:      dispatcher,
 	}
 }
 
@@ -95,21 +102,22 @@ func (s *projectMemberService) logActivity(workspaceID, projectID, userID string
 	})
 }
 
-// sendNotification tạo notification và gửi đến recipient (BR-PRA-07)
-func (s *projectMemberService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string, referenceURL string) {
-	now := time.Now()
-	ref := &referenceURL
-	if referenceURL == "" {
-		ref = nil
+func (s *projectMemberService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
 	}
-	contentPtr := &content
+	return u.FullName
+}
+
+func (s *projectMemberService) sendNotification(recipientID, actorID string, notifType models.NotificationType, title string, content string) {
+	now := time.Now()
 	notification := &models.Notification{
-		ActorID:      &actorID,
-		Type:         notifType,
-		Title:        title,
-		Content:      contentPtr,
-		ReferenceURL: ref,
-		CreatedAt:    now,
+		ActorID:   &actorID,
+		Type:      notifType,
+		Title:     title,
+		Content:   &content,
+		CreatedAt: now,
 	}
 	_ = s.notifRepo.Create(notification, []string{recipientID})
 }
@@ -246,14 +254,16 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 			JoinedAt: cm.JoinedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 
-		// BR-PRA-07: Gửi notification ADDED_TO_PROJECT trước khi INSERT (đã insert rồi ở bulk)
-		s.sendNotification(
-			cm.UserID, userID,
-			models.NotificationTypeADDEDTOPROJECT,
-			fmt.Sprintf("Bạn đã được thêm vào project %s", project.Name),
-			fmt.Sprintf("Bạn tham gia với vai trò %s bởi %s.", roleName, userID),
-			"",
-		)
+		// BR-PRA-07: Gửi notification ADDED_TO_PROJECT
+		s.dispatcher.DispatchADDEDTOPROJECT(&notif.ADDEDTOPROJECTInput{
+			ActorID:     userID,
+			ActorName:   s.getUserName(userID),
+			RecipientID: cm.UserID,
+			ProjectName: project.Name,
+			RoleName:    roleName,
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+		})
 
 		addedUserInfo = append(addedUserInfo, map[string]interface{}{
 			"user_id":   cm.UserID,
@@ -347,10 +357,9 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 	}
 	s.sendNotification(
 		targetUserID, userID,
-		models.NotificationTypeSTATUSCHANGED,
+		models.NotificationTypeANNOUNCEMENT,
 		fmt.Sprintf("Role của bạn trong %s đã thay đổi", project.Name),
-		fmt.Sprintf("Role của bạn được đổi từ %s sang %s bởi %s.", oldRoleName, newRoleName, userID),
-		"",
+		fmt.Sprintf("Role của bạn được đổi từ %s sang %s.", oldRoleName, newRoleName),
 	)
 
 	// BR-PRA-08: Activity log cho role_changed
@@ -402,7 +411,6 @@ func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userI
 		models.NotificationTypeANNOUNCEMENT,
 		fmt.Sprintf("Bạn đã bị xóa khỏi project %s", project.Name),
 		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
-		"",
 	)
 
 	if err := s.memberRepo.Delete(projectID, targetUserID); err != nil {
@@ -453,7 +461,6 @@ func (s *projectMemberService) LeaveProject(workspaceID string, userID string, p
 		models.NotificationTypeANNOUNCEMENT,
 		fmt.Sprintf("Bạn đã rời khỏi project %s", project.Name),
 		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
-		"",
 	)
 
 	if err := s.memberRepo.Delete(projectID, userID); err != nil {

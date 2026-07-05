@@ -74,9 +74,16 @@ type CommentUpdateResponse struct {
 }
 
 type CommentDeleteResponse struct {
-	Message          string `json:"message"`
-	DeletedCommentID string `json:"deleted_comment_id"`
-	DeletedByOwner   bool   `json:"deleted_by_owner"`
+	ID          string        `json:"id"`
+	TaskID      string        `json:"task_id"`
+	IsDeleted   bool          `json:"is_deleted"`
+	Content     *string       `json:"content"`
+	ContentHTML *string       `json:"content_html"`
+	Author      *CommentAuthor `json:"author"`
+	Mentions    []MentionUser `json:"mentions"`
+	IsEdited    bool          `json:"is_edited"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
 }
 
 type MentionableUserInfo struct {
