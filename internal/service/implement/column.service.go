@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
@@ -24,6 +25,7 @@ type columnService struct {
 	columnRepo      repoInterface.ColumnRepository
 	projectRepo     repoInterface.ProjectRepository
 	activityLogRepo repoInterface.ActivityLogRepository
+	userRepo        repoInterface.UserRepository
 }
 
 func NewColumnService(
@@ -31,13 +33,23 @@ func NewColumnService(
 	columnRepo repoInterface.ColumnRepository,
 	projectRepo repoInterface.ProjectRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
 ) _interface.ColumnService {
 	return &columnService{
 		tm:              tm,
 		columnRepo:      columnRepo,
 		projectRepo:     projectRepo,
 		activityLogRepo: activityLogRepo,
+		userRepo:        userRepo,
 	}
+}
+
+func (s *columnService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }
 
 func (s *columnService) getProjectOrFail(workspaceID, projectID string) (*models.Project, error) {
@@ -85,7 +97,7 @@ func (s *columnService) validateTitle(title string) error {
 	return nil
 }
 
-func (s *columnService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+func (s *columnService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
 	var metaStr *string
@@ -94,14 +106,26 @@ func (s *columnService) logActivity(workspaceID, projectID, userID, entityID str
 		s := string(b)
 		metaStr = &s
 	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		s := string(b)
+		snapStr = &s
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &wsID,
-		ProjectID:   &projectID,
-		UserID:      &uID,
-		Action:      action,
-		EntityType:  models.EntityTypeCOLUMN,
-		EntityID:    entityID,
-		Metadata:    metaStr,
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeCOLUMN,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
 }
 
@@ -242,10 +266,11 @@ func (s *columnService) CreateColumn(workspaceID string, userID string, projectI
 			UpdatedAt: col.UpdatedAt,
 		}
 
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionCREATE, map[string]interface{}{
-			"title":    col.Title,
-			"position": col.Position,
-		})
+		actorName := s.getUserName(userID)
+		meta := activitylog.ColumnCreated(col.Title, int(col.Position))
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
+		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionCREATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -295,10 +320,11 @@ func (s *columnService) UpdateColumnTitle(workspaceID string, userID string, pro
 			UpdatedAt: col.UpdatedAt,
 		}
 
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, map[string]interface{}{
-			"old_title": oldTitle,
-			"new_title": col.Title,
-		})
+		actorName := s.getUserName(userID)
+		meta := activitylog.ColumnUpdated(oldTitle, col.Title)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
+		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -334,8 +360,6 @@ func (s *columnService) UpdateColumnPosition(workspaceID string, userID string, 
 		if err := s.validatePositionContext(colRepo, projectID, req.PreviousPosition, req.NextPosition); err != nil {
 			return err
 		}
-
-		oldPosition := col.Position
 
 		var newPos float64
 		if req.PreviousPosition == nil {
@@ -382,12 +406,7 @@ func (s *columnService) UpdateColumnPosition(workspaceID string, userID string, 
 					AllColumns: &allColsInfo,
 				}
 
-				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, map[string]interface{}{
-					"old_position": oldPosition,
-					"new_position": newPos,
-					"rebalanced":   true,
-				})
-				return nil
+			return nil
 			}
 		}
 
@@ -405,11 +424,6 @@ func (s *columnService) UpdateColumnPosition(workspaceID string, userID string, 
 			Rebalanced: false,
 		}
 
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, map[string]interface{}{
-			"old_position": oldPosition,
-			"new_position": newPos,
-			"rebalanced":   false,
-		})
 		return nil
 	})
 	if err != nil {
@@ -507,12 +521,11 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 					TargetColumnID:  req.TargetColumnID,
 				}
 
-				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, map[string]interface{}{
-					"title":             col.Title,
-					"strategy":          "move",
-					"target_column_id":  *req.TargetColumnID,
-					"tasks_moved":       movedInt,
-				})
+				actorName := s.getUserName(userID)
+				meta := activitylog.ColumnDeletedMoveTasks(col.Title, *req.TargetColumnID, targetCol.Title, movedInt)
+				desc := activitylog.GenerateDescription(actorName, meta)
+				snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
+				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 				return nil
 
 			case "delete":
@@ -537,11 +550,11 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 					TasksDeleted:    &tasksDeleted,
 				}
 
-				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, map[string]interface{}{
-					"title":          col.Title,
-					"strategy":       "delete",
-					"tasks_deleted":  tasksDeleted,
-				})
+				actorName := s.getUserName(userID)
+				meta := activitylog.ColumnDeletedDeleteTasks(col.Title, tasksDeleted)
+				desc := activitylog.GenerateDescription(actorName, meta)
+				snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
+				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 				return nil
 
 			default:
@@ -560,9 +573,11 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 			TasksMoved:      &zero,
 		}
 
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, map[string]interface{}{
-			"title": col.Title,
-		})
+		actorName := s.getUserName(userID)
+		meta := activitylog.ColumnDeleted(col.Title)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
+		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"TaskFlow-Go/internal/activitylog"
+
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/database"
@@ -91,7 +93,7 @@ func (s *taskService) getWorkspaceOwner(workspaceID string) (string, error) {
 	return ws.OwnerID, nil
 }
 
-func (s *taskService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+func (s *taskService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
 	var metaStr *string
@@ -100,14 +102,26 @@ func (s *taskService) logActivity(workspaceID, projectID, userID, entityID strin
 		s := string(b)
 		metaStr = &s
 	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		s := string(b)
+		snapStr = &s
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &wsID,
-		ProjectID:   &projectID,
-		UserID:      &uID,
-		Action:      action,
-		EntityType:  models.EntityTypeTASK,
-		EntityID:    entityID,
-		Metadata:    metaStr,
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeTASK,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
 }
 
@@ -430,14 +444,19 @@ func (s *taskService) CreateTask(workspaceID string, userID string, projectID st
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get labels")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, task.ID, models.ActivityActionCREATE, map[string]interface{}{
-		"task_number": task.TaskNumber,
-		"title":       task.Title,
-		"column_id":   task.ColumnID,
-	})
+	actorName := s.getUserName(userID)
+	project, _ := s.projectRepo.GetByID(projectID)
+	projectKey := ""
+	if project != nil {
+		projectKey = project.Key
+	}
+
+	metadata := activitylog.TaskCreated(resp.TaskRef, task.Title, string(task.Priority), resp.Column.Title, len(resp.Assignees))
+	desc := activitylog.GenerateDescription(actorName, metadata)
+	snapshot := activitylog.BuildTaskSnapshot(resp.TaskRef, task.Title, projectKey)
+	s.logActivity(workspaceID, projectID, userID, task.ID, models.ActivityActionCREATE, metadata, desc, snapshot)
 
 	taskRef := s.dispatcher.FormatTaskRef(resp.Column.Title, task.TaskNumber)
-	actorName := s.getUserName(userID)
 	for _, aid := range validAssigneeIDs {
 		s.dispatcher.DispatchASSIGNED(&notif.ASSIGNEDInput{
 			ActorID:     userID,
@@ -571,12 +590,16 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update task")
 	}
 
-	changesCopy := make([]dto.FieldChange, len(changes))
-	copy(changesCopy, changes)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
-		"action":  "UPDATE",
-		"changes": changesCopy,
-	})
+	alChanges := make([]activitylog.ChangeField, len(changes))
+	for i, c := range changes {
+		alChanges[i] = activitylog.BuildChangeField(c.Field, c.OldValue, c.NewValue)
+	}
+	actorName := s.getUserName(userID)
+	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+	metadata := activitylog.TaskUpdated(alChanges)
+	desc := activitylog.GenerateDescription(actorName, metadata)
+	snapshot := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, metadata, desc, snapshot)
 
 	return &dto.UpdateTaskResponse{
 		ID:          task.ID,
@@ -625,11 +648,12 @@ func (s *taskService) DeleteTask(workspaceID string, userID string, projectID st
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete task")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, map[string]interface{}{
-		"task_number":    task.TaskNumber,
-		"title":          task.Title,
-		"subtask_count":  len(subtaskIDs),
-	})
+	actorName := s.getUserName(userID)
+	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+	metadata := activitylog.TaskDeleted(taskRef, task.Title, len(subtaskIDs))
+	desc := activitylog.GenerateDescription(actorName, metadata)
+	snapshot := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, metadata, desc, snapshot)
 
 	return &dto.TaskDeleteResponse{
 		Message:              fmt.Sprintf("Task '%s-%d' has been deleted.", project.Key, task.TaskNumber),
@@ -753,12 +777,13 @@ func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get assignees")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, subtask.ID, models.ActivityActionCREATE, map[string]interface{}{
-		"task_number": subtask.TaskNumber,
-		"title":       subtask.Title,
-		"parent_id":   taskID,
-		"column_id":   subtask.ColumnID,
-	})
+	actorName := s.getUserName(userID)
+	subtaskRef := fmt.Sprintf("%s-%d", project.Key, subtask.TaskNumber)
+	parentRef := fmt.Sprintf("%s-%d", project.Key, parent.TaskNumber)
+	metadata := activitylog.SubtaskCreated(subtaskRef, subtask.Title, parentRef, parent.Title)
+	desc := activitylog.GenerateDescription(actorName, metadata)
+	snapshot := activitylog.BuildTaskSnapshot(subtaskRef, subtask.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, subtask.ID, models.ActivityActionCREATE, metadata, desc, snapshot)
 
 	return &dto.SubtaskCreateResponse{
 		ID:         subtask.ID,

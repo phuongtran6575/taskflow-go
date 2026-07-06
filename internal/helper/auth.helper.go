@@ -1,7 +1,11 @@
 package helper
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -76,4 +80,35 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 	return string(hash), nil
+}
+
+func CheckConfirmPassword(password string, confirmPassword string) bool {
+	return password == confirmPassword
+}
+
+func GenerateRefreshToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func HashRefreshToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+func GenerateAccessAndRefreshTokens(userID, email string) (accessToken, refreshToken, refreshTokenHash string, err error) {
+	accessToken, err = GenerateAccessToken(userID, email)
+	if err != nil {
+		return
+	}
+	rawRefresh, err := GenerateRefreshToken()
+	if err != nil {
+		return
+	}
+	refreshToken = rawRefresh
+	refreshTokenHash = HashRefreshToken(rawRefresh)
+	return
 }

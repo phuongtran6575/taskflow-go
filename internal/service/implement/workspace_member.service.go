@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
@@ -121,6 +122,16 @@ func (s *workspaceMemberService) UpdateMemberRole(workspaceID string, userID str
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get target info")
 	}
 
+	workspace, err := s.workspaceRepo.GetByID(workspaceID)
+	if err == nil {
+		actorName := s.getUserName(userID)
+		targetFullName := s.getUserName(targetUserID)
+		meta := activitylog.WorkspaceRoleChanged(targetUserID, targetFullName, string(targetMember.Role), string(newRole))
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+		s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
+	}
+
 	return &dto.UpdateRoleResponse{
 		UserID:       targetUserID,
 		FullName:     targetInfo.FullName,
@@ -218,21 +229,12 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
 	}
 
-	metadata, _ := json.Marshal(map[string]string{
-		"old_owner_id": userID,
-		"new_owner_id": req.NewOwnerID,
-	})
-	metadataStr := string(metadata)
-	if err := s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &workspaceID,
-		UserID:      &userID,
-		Action:      models.ActivityActionUPDATE,
-		EntityType:  models.EntityTypeWORKSPACE,
-		EntityID:    workspaceID,
-		Metadata:    &metadataStr,
-	}); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to log activity")
-	}
+	actorName := s.getUserName(userID)
+	targetName := s.getUserName(req.NewOwnerID)
+	meta := activitylog.OwnershipTransferred(userID, actorName, req.NewOwnerID, targetName)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.TransferOwnershipResponse{
 		Message: "Ownership transferred successfully.",
@@ -306,6 +308,13 @@ func (s *workspaceMemberService) KickMember(workspaceID string, userID string, t
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to remove member from projects")
 	}
 
+	actorName := s.getUserName(userID)
+	targetName := s.getUserName(targetUserID)
+	meta := activitylog.WorkspaceMemberRemoved(targetUserID, targetName, string(authMember.Role))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, meta, desc, snap)
+
 	return &dto.KickMemberResponse{
 		Message:             "Member has been removed from the workspace.",
 		RemovedUserID:       targetUserID,
@@ -341,4 +350,43 @@ func (s *workspaceMemberService) LeaveWorkspace(workspaceID string, userID strin
 		Message:         "You have left the workspace successfully.",
 		LeftWorkspaceID: workspaceID,
 	}, nil
+}
+
+func (s *workspaceMemberService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeWORKSPACE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
+func (s *workspaceMemberService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }

@@ -30,6 +30,7 @@ type activityLogRow struct {
 	EntityType    string     `gorm:"column:entity_type"`
 	EntityID      string     `gorm:"column:entity_id"`
 	Description   *string    `gorm:"column:description"`
+	EntitySnapshotStr *string `gorm:"column:entity_snapshot"`
 	UserID        *string    `gorm:"column:user_id"`
 	UserFullName  string     `gorm:"column:user_full_name"`
 	Username      string     `gorm:"column:username"`
@@ -49,7 +50,7 @@ func (r *activityLogRepository) buildBaseQuery(filters map[string][]string) *gor
 	q := r.db.Table("activity_logs al").
 		Select(`
 			al.id, al.action, al.entity_type, al.entity_id,
-			al.metadata as description,
+			al.description, al.entity_snapshot,
 			u.id as user_id, u.full_name as user_full_name, u.username, u.avatar_url as user_avatar,
 			w.id as workspace_id, w.name as workspace_name,
 			p.id as project_id, p.name as project_name, p.key as project_key,
@@ -99,7 +100,7 @@ func (r *activityLogRepository) ListByTask(taskID string, limit int, cursor stri
 	q := r.db.Table("activity_logs al").
 		Select(`
 			al.id, al.action, al.entity_type, al.entity_id,
-			al.metadata as description,
+			al.description, al.entity_snapshot,
 			u.id as user_id, u.full_name as user_full_name, u.username, u.avatar_url as user_avatar,
 			p.id as project_id, p.name as project_name, p.key as project_key,
 			al.metadata,
@@ -160,19 +161,21 @@ func (r *activityLogRepository) fetchPaginated(q *gorm.DB, limit int, cursor str
 		}
 
 		description := safeStr(row.Description)
+
 		var metadata map[string]interface{}
 		if row.MetadataStr != nil {
 			json.Unmarshal([]byte(*row.MetadataStr), &metadata)
-			if metadata == nil {
-				metadata = make(map[string]interface{})
-			}
+		}
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+
+		if description == "" {
 			if desc, ok := metadata["description"]; ok {
 				if s, ok2 := desc.(string); ok2 {
 					description = s
 				}
 			}
-		} else {
-			metadata = make(map[string]interface{})
 		}
 
 		var wsRef *dto.ActivityLogWorkspaceRef
@@ -193,25 +196,35 @@ func (r *activityLogRepository) fetchPaginated(q *gorm.DB, limit int, cursor str
 		}
 
 		var snapshot *dto.EntitySnapshot
-		if row.TaskRef != nil || row.TaskTitle != nil {
-			snapshot = &dto.EntitySnapshot{
-				TaskRef:   row.TaskRef,
-				TaskTitle: row.TaskTitle,
+		if row.EntitySnapshotStr != nil {
+			var snap map[string]interface{}
+			if err := json.Unmarshal([]byte(*row.EntitySnapshotStr), &snap); err == nil && snap != nil {
+				es := dto.EntitySnapshot(snap)
+				snapshot = &es
+			}
+		}
+		if snapshot == nil {
+			if row.TaskRef != nil || row.TaskTitle != nil {
+				snap := dto.EntitySnapshot{
+					"task_ref":   safeStr(row.TaskRef),
+					"task_title": safeStr(row.TaskTitle),
+				}
+				snapshot = &snap
 			}
 		}
 
 		data[i] = dto.ActivityLogInfo{
-			ID:            row.ID,
-			Action:        row.Action,
-			EntityType:    row.EntityType,
-			EntityID:      row.EntityID,
-			Description:   description,
-			Actor:         actor,
-			Workspace:     wsRef,
-			Project:       projRef,
+			ID:             row.ID,
+			Action:         row.Action,
+			EntityType:     row.EntityType,
+			EntityID:       row.EntityID,
+			Description:    description,
+			Actor:          actor,
+			Workspace:      wsRef,
+			Project:        projRef,
 			EntitySnapshot: snapshot,
-			Metadata:      metadata,
-			CreatedAt:     row.CreatedAt.Format(time.RFC3339),
+			Metadata:       metadata,
+			CreatedAt:      row.CreatedAt.Format(time.RFC3339),
 		}
 	}
 

@@ -83,15 +83,17 @@ var (
 	ErrUnauthorized        = &AppError{Status: http.StatusUnauthorized, Code: "UNAUTHORIZED", Message: "Authentication required"}
 
 	// User errors
-	ErrUsernameAlreadyTaken       = &AppError{Status: http.StatusConflict, Code: "USERNAME_ALREADY_TAKEN", Message: "Username is already taken"}
-	ErrWrongCurrentPassword       = &AppError{Status: http.StatusUnauthorized, Code: "WRONG_CURRENT_PASSWORD", Message: "Current password is incorrect"}
-	ErrOAuthAccountNoPassword     = &AppError{Status: http.StatusBadRequest, Code: "OAUTH_ACCOUNT_NO_PASSWORD", Message: "OAuth account has no password set"}
-	ErrInvalidFileType            = &AppError{Status: http.StatusBadRequest, Code: "INVALID_FILE_TYPE", Message: "File type not supported (JPG/PNG/WEBP only)"}
-	ErrFileTooLarge               = &AppError{Status: http.StatusBadRequest, Code: "FILE_TOO_LARGE", Message: "File exceeds maximum size"}
-	ErrCannotRevokeCurrentSession = &AppError{Status: http.StatusBadRequest, Code: "CANNOT_REVOKE_CURRENT_SESSION", Message: "Use /logout to revoke current session"}
-	ErrSessionNotFound            = &AppError{Status: http.StatusNotFound, Code: "SESSION_NOT_FOUND", Message: "Session not found"}
-	ErrInvalidConfirmation        = &AppError{Status: http.StatusBadRequest, Code: "INVALID_CONFIRMATION", Message: "Confirmation text does not match"}
-	ErrWorkspaceOwnerConflict     = &AppError{Status: http.StatusConflict, Code: "WORKSPACE_OWNER_CONFLICT", Message: "You are still an OWNER of one or more workspaces"}
+	ErrUsernameAlreadyTaken        = &AppError{Status: http.StatusConflict, Code: "USERNAME_ALREADY_TAKEN", Message: "Username is already taken"}
+	ErrWrongCurrentPassword        = &AppError{Status: http.StatusUnauthorized, Code: "WRONG_CURRENT_PASSWORD", Message: "Current password is incorrect"}
+	ErrOAuthAccountNoPassword      = &AppError{Status: http.StatusBadRequest, Code: "OAUTH_ACCOUNT_NO_PASSWORD", Message: "OAuth account has no password set"}
+	ErrInvalidFileType             = &AppError{Status: http.StatusBadRequest, Code: "INVALID_FILE_TYPE", Message: "File type not supported (JPG/PNG/WEBP only)"}
+	ErrFileTooLarge                = &AppError{Status: http.StatusBadRequest, Code: "FILE_TOO_LARGE", Message: "File exceeds maximum size"}
+	ErrCannotRevokeCurrentSession  = &AppError{Status: http.StatusBadRequest, Code: "CANNOT_REVOKE_CURRENT_SESSION", Message: "Use /logout to revoke current session"}
+	ErrSessionNotFound             = &AppError{Status: http.StatusNotFound, Code: "SESSION_NOT_FOUND", Message: "Session not found"}
+	ErrInvalidConfirmation         = &AppError{Status: http.StatusBadRequest, Code: "INVALID_CONFIRMATION", Message: "Confirmation text does not match"}
+	ErrWorkspaceOwnerConflict      = &AppError{Status: http.StatusConflict, Code: "WORKSPACE_OWNER_CONFLICT", Message: "You are still an OWNER of one or more workspaces"}
+	ErrFullNameRequired            = &AppError{Status: http.StatusBadRequest, Code: "FULL_NAME_REQUIRED", Message: "Full name cannot be empty"}
+	ErrSameAsCurrentPassword       = &AppError{Status: http.StatusBadRequest, Code: "SAME_AS_CURRENT_PASSWORD", Message: "New password must be different from current password"}
 
 	// Workspace errors
 	ErrDomainAlreadyTaken      = &AppError{Status: http.StatusConflict, Code: "DOMAIN_ALREADY_TAKEN", Message: "Domain is already in use"}

@@ -18,10 +18,7 @@ type ActivityLogProjectRef struct {
 	Key  string `json:"key"`
 }
 
-type EntitySnapshot struct {
-	TaskRef   *string `json:"task_ref,omitempty"`
-	TaskTitle *string `json:"task_title,omitempty"`
-}
+type EntitySnapshot map[string]interface{}
 
 type ChangeField struct {
 	Field    string `json:"field"`
@@ -30,17 +27,17 @@ type ChangeField struct {
 }
 
 type ActivityLogInfo struct {
-	ID            string                 `json:"id"`
-	Action        string                 `json:"action"`
-	EntityType    string                 `json:"entity_type"`
-	EntityID      string                 `json:"entity_id"`
-	Description   string                 `json:"description"`
-	Actor         ActivityLogActor       `json:"actor"`
-	Workspace     *ActivityLogWorkspaceRef `json:"workspace,omitempty"`
-	Project       *ActivityLogProjectRef `json:"project,omitempty"`
-	EntitySnapshot *EntitySnapshot       `json:"entity_snapshot,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata"`
-	CreatedAt     string                 `json:"created_at"`
+	ID             string                 `json:"id"`
+	Action         string                 `json:"action"`
+	EntityType     string                 `json:"entity_type"`
+	EntityID       string                 `json:"entity_id"`
+	Description    string                 `json:"description"`
+	Actor          ActivityLogActor       `json:"actor"`
+	Workspace      *ActivityLogWorkspaceRef `json:"workspace,omitempty"`
+	Project        *ActivityLogProjectRef `json:"project,omitempty"`
+	EntitySnapshot *EntitySnapshot        `json:"entity_snapshot,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata"`
+	CreatedAt      string                 `json:"created_at"`
 }
 
 type ActivityLogListResponse struct {

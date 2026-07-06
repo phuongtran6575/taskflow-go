@@ -4,7 +4,7 @@ import "time"
 
 type UpdateProfileRequest struct {
 	FullName *string `json:"full_name" binding:"omitempty,min=1"`
-	Username *string `json:"username" binding:"omitempty,min=3"`
+	Username *string `json:"username" binding:"omitempty,min=3,max=30"`
 }
 
 type ChangePasswordRequest struct {
@@ -32,12 +32,13 @@ type UserProfileResponse struct {
 }
 
 type UpdateProfileResponse struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	FullName  string    `json:"full_name"`
-	AvatarURL *string   `json:"avatar_url"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
+	Email       string    `json:"email"`
+	PhoneNumber string    `json:"phone_number"`
+	FullName    string    `json:"full_name"`
+	AvatarURL   *string   `json:"avatar_url"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type AvatarResponse struct {
@@ -45,7 +46,9 @@ type AvatarResponse struct {
 }
 
 type ChangePasswordResponse struct {
-	Message string `json:"message"`
+	Message      string `json:"message"`
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 type SessionInfo struct {

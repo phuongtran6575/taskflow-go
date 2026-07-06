@@ -12,6 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
@@ -35,6 +36,7 @@ type projectService struct {
 	workspaceRepo   repoInterface.WorkspaceRepository
 	roleRepo        repoInterface.RoleRepository
 	activityLogRepo repoInterface.ActivityLogRepository
+	userRepo        repoInterface.UserRepository
 	dispatcher      *job.Dispatcher
 }
 
@@ -46,6 +48,7 @@ func NewProjectService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	roleRepo repoInterface.RoleRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
 	dispatcher *job.Dispatcher,
 ) _interface.ProjectService {
 	return &projectService{
@@ -56,6 +59,7 @@ func NewProjectService(
 		workspaceRepo:   workspaceRepo,
 		roleRepo:        roleRepo,
 		activityLogRepo: activityLogRepo,
+		userRepo:        userRepo,
 		dispatcher:      dispatcher,
 	}
 }
@@ -174,24 +178,44 @@ func (s *projectService) isValidBackground(bg string) bool {
 	return validImageExt.MatchString(bg)
 }
 
-func (s *projectService) logActivity(workspaceID, projectID, userID string, action models.ActivityAction, metadata map[string]interface{}) {
+func (s *projectService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
 	var metaStr *string
 	if metadata != nil {
 		b, _ := json.Marshal(metadata)
-		s := string(b)
-		metaStr = &s
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
 	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &wsID,
-		ProjectID:   &projectID,
-		UserID:      &uID,
-		Action:      action,
-		EntityType:  models.EntityTypePROJECT,
-		EntityID:    projectID,
-		Metadata:    metaStr,
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypePROJECT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *projectService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }
 
 func (s *projectService) ListProjects(workspaceID string, userID string, isOwner bool, isArchived *bool, isFavorite *bool, search string, param dto.PaginationParam) ([]dto.ProjectSummary, *dto.Pagination, error) {
@@ -293,10 +317,11 @@ func (s *projectService) CreateProject(workspaceID string, userID string, req *d
 		}
 		result = projectResponse
 
-		s.logActivity(workspaceID, project.ID, userID, models.ActivityActionCREATE, map[string]interface{}{
-			"project_name": req.Name,
-			"project_key":  key,
-		})
+		actorName := s.getUserName(userID)
+		meta := activitylog.ProjectCreated(req.Name, key)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildProjectSnapshot(req.Name, key)
+		s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionCREATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -352,17 +377,14 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 		return nil, apperror.ErrProjectArchived
 	}
 
-	var metadata map[string]interface{}
+	var changes []activitylog.ChangeField
 
 	if req.Name != nil {
 		if len(*req.Name) < 1 || len(*req.Name) > 100 {
 			return nil, apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "Project name must be between 1 and 100 characters")
 		}
 		if project.Name != *req.Name {
-			metadata = map[string]interface{}{
-				"old_name": project.Name,
-				"new_name": *req.Name,
-			}
+			changes = append(changes, activitylog.BuildChangeField("name", project.Name, *req.Name))
 		}
 		project.Name = *req.Name
 	}
@@ -371,9 +393,7 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 			return nil, apperror.ErrInvalidBackground
 		}
 		if project.Background != *req.Background {
-			metadata = map[string]interface{}{
-				"field": "background",
-			}
+			changes = append(changes, activitylog.BuildChangeField("background", project.Background, *req.Background))
 		}
 		project.Background = *req.Background
 	}
@@ -387,10 +407,7 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 			newIcon = *req.Icon
 		}
 		if oldIcon != newIcon {
-			metadata = map[string]interface{}{
-				"old_icon": oldIcon,
-				"new_icon": newIcon,
-			}
+			changes = append(changes, activitylog.BuildChangeField("icon", oldIcon, newIcon))
 		}
 		project.Icon = req.Icon
 	}
@@ -400,8 +417,12 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update project")
 	}
 
-	if metadata != nil {
-		s.logActivity(workspaceID, project.ID, userID, models.ActivityActionUPDATE, metadata)
+	if len(changes) > 0 {
+		actorName := s.getUserName(userID)
+		meta := activitylog.ProjectUpdated(changes)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+		s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
 	}
 
 	return &dto.UpdateProjectResponse{
@@ -432,9 +453,11 @@ func (s *projectService) ArchiveProject(workspaceID string, userID string, proje
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to archive project")
 	}
 
-	s.logActivity(workspaceID, project.ID, userID, models.ActivityActionUPDATE, map[string]interface{}{
-		"is_archived": true,
-	})
+	actorName := s.getUserName(userID)
+	meta := activitylog.ProjectArchived()
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.ArchiveProjectResponse{
 		ID:         project.ID,
@@ -462,9 +485,11 @@ func (s *projectService) UnarchiveProject(workspaceID string, userID string, pro
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unarchive project")
 	}
 
-	s.logActivity(workspaceID, project.ID, userID, models.ActivityActionUPDATE, map[string]interface{}{
-		"is_archived": false,
-	})
+	actorName := s.getUserName(userID)
+	meta := activitylog.ProjectUnarchived()
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.UnarchiveProjectResponse{
 		ID:           project.ID,
@@ -517,11 +542,11 @@ func (s *projectService) DeleteProject(workspaceID string, userID string, projec
 
 	s.dispatcher.CascadeSoftDeleteProject(projectID)
 
-	s.logActivity(workspaceID, project.ID, userID, models.ActivityActionDELETE, map[string]interface{}{
-		"name":                project.Name,
-		"key":                 project.Key,
-		"total_tasks_deleted": taskCount,
-	})
+	actorName := s.getUserName(userID)
+	meta := activitylog.ProjectDeleted(project.Name, project.Key, int(taskCount))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionDELETE, meta, desc, snap)
 
 	return &dto.ProjectDeleteResponse{
 		Message:          "Project '" + project.Name + "' has been deleted successfully.",

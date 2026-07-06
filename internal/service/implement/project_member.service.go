@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	"TaskFlow-Go/internal/notif"
@@ -82,23 +83,35 @@ func (s *projectMemberService) isWorkspaceOwner(workspaceID, userID string) (boo
 }
 
 // logActivity ghi activity log cho project member operations (BR-PRA-08)
-func (s *projectMemberService) logActivity(workspaceID, projectID, userID string, action models.ActivityAction, metadata map[string]interface{}) {
+func (s *projectMemberService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
 	var metaStr *string
 	if metadata != nil {
 		b, _ := json.Marshal(metadata)
-		s := string(b)
-		metaStr = &s
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
 	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &wsID,
-		ProjectID:   &projectID,
-		UserID:      &uID,
-		Action:      action,
-		EntityType:  models.EntityTypePROJECT,
-		EntityID:    projectID,
-		Metadata:    metaStr,
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypePROJECT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
 }
 
@@ -238,7 +251,7 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 	}
 
 	var addedInfos []dto.AddedMemberInfo
-	addedUserInfo := make([]map[string]interface{}, 0, len(createdMembers))
+	addedUserInfo := make([]map[string]string, 0, len(createdMembers))
 	for _, cm := range createdMembers {
 		roleName := ""
 		if cm.RoleID != nil {
@@ -265,17 +278,18 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 			ProjectID:   projectID,
 		})
 
-		addedUserInfo = append(addedUserInfo, map[string]interface{}{
+		addedUserInfo = append(addedUserInfo, map[string]string{
 			"user_id":   cm.UserID,
 			"role_name": roleName,
 		})
 	}
 
 	// BR-PRA-08: Activity log cho member_added
-	s.logActivity(workspaceID, projectID, userID, models.ActivityActionCREATE, map[string]interface{}{
-		"event":       "member_added",
-		"added_users": addedUserInfo,
-	})
+	actorName := s.getUserName(userID)
+	meta := activitylog.ProjectMemberAdded(addedUserInfo)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionCREATE, meta, desc, snap)
 
 	return &dto.AddMembersResponse{
 		Added:                addedInfos,
@@ -363,12 +377,12 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 	)
 
 	// BR-PRA-08: Activity log cho role_changed
-	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":         "role_changed",
-		"user_id":       targetUserID,
-		"old_role_name": oldRoleName,
-		"new_role_name": newRoleName,
-	})
+	actorName := s.getUserName(userID)
+	targetFullName := s.getUserName(targetUserID)
+	meta := activitylog.ProjectRoleChanged(targetUserID, targetFullName, oldRoleName, newRoleName)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.UpdateProjectMemberRoleResponse{
 		UserID:       member.UserID,
@@ -418,11 +432,12 @@ func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userI
 	}
 
 	// BR-PRA-08: Activity log cho member_removed
-	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":      "member_removed",
-		"user_id":    targetUserID,
-		"removed_by": "manager",
-	})
+	actorName := s.getUserName(userID)
+	targetFullName := s.getUserName(targetUserID)
+	meta := activitylog.ProjectMemberRemoved(targetUserID, targetFullName, "manager")
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.RemoveProjectMemberResponse{
 		Message:       "Member has been removed from the project.",
@@ -468,11 +483,12 @@ func (s *projectMemberService) LeaveProject(workspaceID string, userID string, p
 	}
 
 	// BR-PRA-08: Activity log cho member_removed (self)
-	s.logActivity(workspaceID, projectID, userID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":      "member_removed",
-		"user_id":    userID,
-		"removed_by": "self",
-	})
+	actorName := s.getUserName(userID)
+	selfFullName := s.getUserName(userID)
+	meta := activitylog.ProjectMemberRemoved(userID, selfFullName, "self")
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.LeaveProjectResponse{
 		Message:       "You have left the project successfully.",

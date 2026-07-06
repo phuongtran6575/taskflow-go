@@ -39,6 +39,7 @@ func (d *Dispatcher) StartDailyJobs() {
 		log.Println("[job] Starting daily jobs...")
 		startDailyPermanentDelete(d.db)
 		startDailyNotificationCleanup(d.db)
+		startDailyActivityLogCleanup(d.db)
 	}()
 }
 

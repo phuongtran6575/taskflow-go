@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/markdown"
 	"TaskFlow-Go/internal/models"
@@ -187,6 +188,38 @@ func (s *commentService) getUserName(userID string) string {
 	return u.FullName
 }
 
+func (s *commentService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeCOMMENT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
 func truncateContent(content string, maxLen int) string {
 	runes := []rune(content)
 	if len(runes) > maxLen {
@@ -328,20 +361,10 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		})
 	}
 
-	metaJSON, _ := json.Marshal(map[string]interface{}{
-		"content_preview": truncateContent(content, 50),
-		"mention_count":   len(mentionedIDs),
-	})
-	metaStr := string(metaJSON)
-	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &workspaceID,
-		ProjectID:   &projectID,
-		UserID:      &userID,
-		Action:      models.ActivityActionCREATE,
-		EntityType:  models.EntityTypeCOMMENT,
-		EntityID:    comment.ID,
-		Metadata:    &metaStr,
-	})
+	meta := activitylog.CommentCreated(comment.ID, truncateContent(content, 50), len(mentionedIDs))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildCommentSnapshot(taskRef, task.Title)
+	s.logActivity(workspaceID, projectID, userID, comment.ID, models.ActivityActionCREATE, meta, desc, snap)
 
 	return &dto.CommentCreateResponse{
 		ID:          comment.ID,

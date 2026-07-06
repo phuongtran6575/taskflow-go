@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
@@ -249,26 +250,33 @@ func (s *taskBoardService) MoveTask(workspaceID string, userID string, projectID
 		}
 
 		if isCrossColumn {
-			wsID := workspaceID
-			uID := userID
-			meta := map[string]interface{}{
-				"event":              "column_changed",
-				"from_column_id":     oldColumn.ID,
-				"from_column_title":  oldColumn.Title,
-				"to_column_id":       req.ColumnID,
-				"to_column_title":    targetCol.Title,
-			}
+			actorName := s.getUserName(userID)
+			taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+			meta := activitylog.ColumnChanged(oldColumn.ID, oldColumn.Title, req.ColumnID, targetCol.Title)
+			desc := activitylog.GenerateDescription(actorName, meta)
+			snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+
 			metaBytes, _ := json.Marshal(meta)
 			metaStr := string(metaBytes)
+			snapBytes, _ := json.Marshal(snap)
+			snapStr := string(snapBytes)
+			var descPtr *string
+			if desc != "" {
+				descPtr = &desc
+			}
+			wsID := workspaceID
+			uID := userID
 			if err := tx.Create(&models.ActivityLog{
-				WorkspaceID: &wsID,
-				ProjectID:   &projectID,
-				UserID:      &uID,
-				Action:      models.ActivityActionUPDATE,
-				EntityType:  models.EntityTypeTASK,
-				EntityID:    taskID,
-				Metadata:    &metaStr,
-				CreatedAt:   time.Now(),
+				WorkspaceID:    &wsID,
+				ProjectID:      &projectID,
+				UserID:         &uID,
+				Action:         models.ActivityActionUPDATE,
+				EntityType:     models.EntityTypeTASK,
+				EntityID:       taskID,
+				Description:    descPtr,
+				Metadata:       &metaStr,
+				EntitySnapshot: &snapStr,
+				CreatedAt:      time.Now(),
 			}).Error; err != nil {
 				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to log activity")
 			}
@@ -422,4 +430,12 @@ func (s *taskBoardService) sendStatusChangeNotification(taskID, actorID string, 
 		ProjectID:    project.ID,
 		TaskID:       taskID,
 	})
+}
+
+func (s *taskBoardService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }

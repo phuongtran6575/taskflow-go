@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	"TaskFlow-Go/internal/notif"
@@ -119,7 +120,7 @@ func (s *taskAssigneeService) dedupStrings(items []string) []string {
 	return result
 }
 
-func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
+func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
 	var metaStr *string
@@ -128,14 +129,26 @@ func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entity
 		str := string(b)
 		metaStr = &str
 	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &wsID,
-		ProjectID:   &projectID,
-		UserID:      &uID,
-		Action:      action,
-		EntityType:  models.EntityTypeTASK,
-		EntityID:    entityID,
-		Metadata:    metaStr,
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeTASK,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
 }
 
@@ -324,14 +337,16 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 	}
 
 	// BR-ASSIGN-06: Activity log
-	addedInfo := make([]dto.UserRef, 0, len(addedIDs))
+	addedUsers := make([]map[string]string, 0, len(addedIDs))
 	for _, id := range addedIDs {
-		addedInfo = append(addedInfo, dto.UserRef{UserID: id, FullName: infoMap[id].FullName})
+		addedUsers = append(addedUsers, map[string]string{"user_id": id, "full_name": infoMap[id].FullName})
 	}
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":  "assignees_added",
-		"added":  addedInfo,
-	})
+	actorName = s.getUserName(userID)
+	taskRef = s.getTaskRef(task, project)
+	meta := activitylog.AssigneesAdded(addedUsers)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.AssignMembersResponse{
 		TaskID:                 taskID,
@@ -388,10 +403,16 @@ func (s *taskAssigneeService) UnassignMembersFromTask(workspaceID string, userID
 	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
 	// BR-ASSIGN-06: Activity log
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":   "assignees_removed",
-		"removed": removed,
-	})
+	removedUsers := make([]map[string]string, 0, len(removed))
+	for _, r := range removed {
+		removedUsers = append(removedUsers, map[string]string{"user_id": r.UserID, "full_name": r.FullName})
+	}
+	actorName := s.getUserName(userID)
+	taskRef := s.getTaskRef(task, project)
+	meta := activitylog.AssigneesRemoved(removedUsers)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.UnassignMembersResponse{
 		TaskID:              taskID,
@@ -451,11 +472,16 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 	}
 
 	// BR-ASSIGN-06: Activity log — self_assigned
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+	actorName := s.getUserName(userID)
+	taskRef := s.getTaskRef(task, project)
+	meta := map[string]interface{}{
 		"event":     "self_assigned",
 		"user_id":   userID,
-		"full_name": "", // sẽ được enrich ở tầng đọc nếu cần
-	})
+		"full_name": actorName,
+	}
+	desc := fmt.Sprintf("%s đã tự gán task %s", actorName, taskRef)
+	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	all, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
@@ -485,11 +511,16 @@ func (s *taskAssigneeService) SelfUnassignFromTask(workspaceID string, userID st
 	_ = s.assigneeRepo.Delete(taskID, userID)
 
 	// BR-ASSIGN-06: Activity log — self_unassigned
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, map[string]interface{}{
+	actorName := s.getUserName(userID)
+	taskRef := s.getTaskRef(task, project)
+	meta := map[string]interface{}{
 		"event":     "self_unassigned",
 		"user_id":   userID,
-		"full_name": "",
-	})
+		"full_name": actorName,
+	}
+	desc := fmt.Sprintf("%s đã tự bỏ gán task %s", actorName, taskRef)
+	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 

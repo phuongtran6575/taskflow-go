@@ -25,15 +25,17 @@ const (
 )
 
 type ActivityLog struct {
-	ID          string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	WorkspaceID *string        `gorm:"type:uuid"`
-	ProjectID   *string        `gorm:"type:uuid"`
-	UserID      *string        `gorm:"type:uuid"`
-	Action      ActivityAction `gorm:"type:varchar(10);not null"`
-	EntityType  EntityType     `gorm:"type:varchar(20);not null"`
-	EntityID    string         `gorm:"type:uuid;not null"`
-	Metadata    *string        `gorm:"type:jsonb"`
-	CreatedAt   time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	ID             string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	WorkspaceID    *string        `gorm:"type:uuid"`
+	ProjectID      *string        `gorm:"type:uuid"`
+	UserID         *string        `gorm:"type:uuid"`
+	Action         ActivityAction `gorm:"type:varchar(10);not null"`
+	EntityType     EntityType     `gorm:"type:varchar(20);not null"`
+	EntityID       string         `gorm:"type:uuid;not null"`
+	Description    *string        `gorm:"type:text"`
+	Metadata       *string        `gorm:"type:jsonb"`
+	EntitySnapshot *string        `gorm:"type:jsonb"`
+	CreatedAt      time.Time      `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 
 	Workspace *Workspace `gorm:"foreignKey:WorkspaceID;constraint:OnDelete:SET NULL"`
 	Project   *Project   `gorm:"foreignKey:ProjectID;constraint:OnDelete:SET NULL"`

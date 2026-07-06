@@ -154,7 +154,9 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		appresponse.Fail(c, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	result, err := h.userService.ChangePassword(userID, &req)
+	userAgent := c.GetHeader("User-Agent")
+	ipAddress := c.ClientIP()
+	result, err := h.userService.ChangePassword(userID, &req, userAgent, ipAddress)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

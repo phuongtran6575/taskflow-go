@@ -3,7 +3,7 @@ package implement
 import (
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
-	"TaskFlow-Go/internal/mapper"
+	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"errors"
@@ -22,11 +22,20 @@ func (s *authService) Register(req *dto.RegisterRequest) (*dto.AuthResponse, err
 	if err == nil && user != nil {
 		return nil, errors.New("user already exists")
 	}
+	if !helper.CheckConfirmPassword(req.Password, req.ConfirmPassword) {
+		return nil, errors.New("passwords do not match")
+	}
 	hashedPassword, err := helper.HashPassword(req.Password)
 	if err != nil {
 		return nil, errors.New("failed to hash password")
 	}
-	user = mapper.ToUserFromRegisterRequest(req, hashedPassword)
+	user = &models.User{
+		Email:        req.Email,
+		PasswordHash: &hashedPassword,
+		FullName:     req.FullName,
+		Username:     req.Username,
+		PhoneNumber:  req.PhoneNumber,
+	}
 	err = s.userRepo.Create(user)
 	if err != nil {
 		return nil, errors.New("failed to create user")

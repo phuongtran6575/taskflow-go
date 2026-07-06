@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/job"
@@ -24,6 +26,8 @@ type workspaceService struct {
 	workspaceRepo      repoInterface.WorkspaceRepository
 	roleRepo           repoInterface.RoleRepository
 	rolePermissionRepo repoInterface.RolePermissionRepository
+	activityLogRepo    repoInterface.ActivityLogRepository
+	userRepo           repoInterface.UserRepository
 	dispatcher         *job.Dispatcher
 }
 
@@ -31,12 +35,16 @@ func NewWorkspaceService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	roleRepo repoInterface.RoleRepository,
 	rolePermissionRepo repoInterface.RolePermissionRepository,
+	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
 	dispatcher *job.Dispatcher,
 ) _interface.WorkspaceService {
 	return &workspaceService{
 		workspaceRepo:      workspaceRepo,
 		roleRepo:           roleRepo,
 		rolePermissionRepo: rolePermissionRepo,
+		activityLogRepo:    activityLogRepo,
+		userRepo:           userRepo,
 		dispatcher:         dispatcher,
 	}
 }
@@ -103,6 +111,12 @@ func (s *workspaceService) CreateWorkspace(userID string, req *dto.CreateWorkspa
 		return nil, err
 	}
 
+	actorName := s.getUserName(userID)
+	meta := activitylog.WorkspaceCreated(workspace.Name, string(workspace.Plan))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	s.logActivity(workspace.ID, "", userID, workspace.ID, models.ActivityActionCREATE, meta, desc, snap)
+
 	return &dto.WorkspaceCreateResponse{
 		ID:        workspace.ID,
 		Name:      workspace.Name,
@@ -159,9 +173,14 @@ func (s *workspaceService) UpdateWorkspace(workspaceID string, userID string, re
 		return nil, apperror.ErrForbidden
 	}
 
+	var changes []activitylog.ChangeField
+
 	if req.Name != nil {
 		if err := validator.ValidateWorkspaceName(*req.Name); err != nil {
 			return nil, apperror.NewAppError(400, "VALIDATION_ERROR", err.Error())
+		}
+		if workspace.Name != *req.Name {
+			changes = append(changes, activitylog.BuildChangeField("name", workspace.Name, *req.Name))
 		}
 		workspace.Name = *req.Name
 	}
@@ -178,8 +197,16 @@ func (s *workspaceService) UpdateWorkspace(workspaceID string, userID string, re
 			if helper.IsDomainTaken(existingWorkspace, workspaceID) {
 				return nil, apperror.ErrDomainAlreadyTaken
 			}
+			oldDomain := ""
+			if workspace.Domain != nil {
+				oldDomain = *workspace.Domain
+			}
+			changes = append(changes, activitylog.BuildChangeField("domain", oldDomain, *req.Domain))
 			workspace.Domain = req.Domain
 		} else {
+			if workspace.Domain != nil {
+				changes = append(changes, activitylog.BuildChangeField("domain", *workspace.Domain, ""))
+			}
 			workspace.Domain = nil
 		}
 	}
@@ -187,6 +214,14 @@ func (s *workspaceService) UpdateWorkspace(workspaceID string, userID string, re
 	workspace.UpdatedAt = time.Now()
 	if err := s.workspaceRepo.Update(workspace); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update workspace")
+	}
+
+	if len(changes) > 0 {
+		actorName := s.getUserName(userID)
+		meta := activitylog.WorkspaceUpdated(changes)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+		s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
 	}
 
 	return &dto.UpdateWorkspaceResponse{
@@ -245,6 +280,12 @@ func (s *workspaceService) UpgradePlan(workspaceID string, userID string, req *d
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to upgrade plan")
 	}
 
+	actorName := s.getUserName(userID)
+	meta := activitylog.PlanUpgraded(string(prevPlan), string(newPlan))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
+
 	return &dto.PlanUpgradeResponse{
 		ID:           workspace.ID,
 		PreviousPlan: string(prevPlan),
@@ -276,6 +317,12 @@ func (s *workspaceService) DeleteWorkspace(workspaceID string, userID string, re
 	if strings.TrimSpace(req.ConfirmationName) != strings.TrimSpace(workspace.Name) {
 		return nil, apperror.ErrInvalidConfirmation
 	}
+
+	actorName := s.getUserName(userID)
+	meta := activitylog.WorkspaceDeleted(workspace.Name)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, meta, desc, snap)
 
 	if err := s.workspaceRepo.Delete(workspaceID); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to delete workspace")
@@ -348,4 +395,43 @@ func (s *workspaceService) seedDefaultRoles(workspaceID string) error {
 	}
 
 	return nil
+}
+
+func (s *workspaceService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeWORKSPACE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
+func (s *workspaceService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }

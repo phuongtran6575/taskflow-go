@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
@@ -35,6 +36,7 @@ type attachmentService struct {
 	workspaceRepo     repoInterface.WorkspaceRepository
 	activityLogRepo   repoInterface.ActivityLogRepository
 	projectMemberRepo repoInterface.ProjectMemberRepository
+	userRepo          repoInterface.UserRepository
 }
 
 func NewAttachmentService(
@@ -44,6 +46,7 @@ func NewAttachmentService(
 	workspaceRepo repoInterface.WorkspaceRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
 	projectMemberRepo repoInterface.ProjectMemberRepository,
+	userRepo repoInterface.UserRepository,
 ) _interface.AttachmentService {
 	return &attachmentService{
 		attachmentRepo:    attachmentRepo,
@@ -52,6 +55,7 @@ func NewAttachmentService(
 		workspaceRepo:     workspaceRepo,
 		activityLogRepo:   activityLogRepo,
 		projectMemberRepo: projectMemberRepo,
+		userRepo:          userRepo,
 	}
 }
 
@@ -311,22 +315,15 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 				"file_type":  u.FileType,
 			})
 		}
+		actorName := s.getUserName(userID)
 		meta := map[string]interface{}{
-			"event":           "attachments_uploaded",
-			"files":           fileInfos,
+			"event":            "attachments_uploaded",
+			"files":            fileInfos,
 			"total_size_bytes": totalValidSize,
 		}
-		metaBytes, _ := json.Marshal(meta)
-		metaStr := string(metaBytes)
-		s.activityLogRepo.Create(&models.ActivityLog{
-			WorkspaceID: &workspaceID,
-			ProjectID:   &projectID,
-			UserID:      &userID,
-			Action:      models.ActivityActionCREATE,
-			EntityType:  models.EntityTypeTASK,
-			EntityID:    taskID,
-			Metadata:    &metaStr,
-		})
+		desc := activitylog.GenerateDescription(actorName, meta)
+		snap := activitylog.BuildTaskSnapshot(ref, task.Title, project.Key)
+		s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionCREATE, meta, desc, snap)
 	}
 
 	return &dto.UploadAttachmentsResponse{
@@ -420,29 +417,62 @@ func (s *attachmentService) DeleteAttachment(workspaceID string, userID string, 
 	}
 
 	isOwn := att.UploaderID != nil && *att.UploaderID == userID
+	actorName := s.getUserName(userID)
 	meta := map[string]interface{}{
 		"event":       "attachment_deleted",
 		"file_name":   att.FileName,
 		"size_bytes":  att.SizeBytes,
 		"deleted_own": isOwn,
 	}
-	metaBytes, _ := json.Marshal(meta)
-	metaStr := string(metaBytes)
-	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &workspaceID,
-		ProjectID:   &projectID,
-		UserID:      &userID,
-		Action:      models.ActivityActionDELETE,
-		EntityType:  models.EntityTypeTASK,
-		EntityID:    taskID,
-		Metadata:    &metaStr,
-	})
+	desc := activitylog.GenerateDescription(actorName, meta)
+	taskSnap := activitylog.BuildTaskSnapshot("", "", project.Key)
+	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, meta, desc, taskSnap)
 
 	return &dto.DeleteAttachmentResponse{
 		Message:                   fmt.Sprintf("Attachment '%s' has been deleted.", att.FileName),
 		DeletedAttachmentID:       attachmentID,
 		ScheduledPermanentDeleteAt: scheduledAt.Format(time.RFC3339),
 	}, nil
+}
+
+func (s *attachmentService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeTASK,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
+func (s *attachmentService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }
 
 func (s *attachmentService) canDeleteAttachment(workspaceID, projectID, userID string, att *models.Attachment) error {

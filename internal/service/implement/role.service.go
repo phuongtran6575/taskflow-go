@@ -2,19 +2,21 @@ package implement
 
 import (
 	"encoding/json"
-	"gorm.io/gorm"
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"gorm.io/gorm"
+
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
-	"errors"
-	"net/http"
 )
 
 type roleService struct {
@@ -24,6 +26,7 @@ type roleService struct {
 	projMemRepo        repoInterface.ProjectMemberRepository
 	workspaceRepo      repoInterface.WorkspaceRepository
 	activityLogRepo    repoInterface.ActivityLogRepository
+	userRepo           repoInterface.UserRepository
 }
 
 func NewRoleService(
@@ -33,6 +36,7 @@ func NewRoleService(
 	projMemRepo repoInterface.ProjectMemberRepository,
 	workspaceRepo repoInterface.WorkspaceRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
 ) _interface.RoleService {
 	return &roleService{
 		roleRepo:           roleRepo,
@@ -41,6 +45,7 @@ func NewRoleService(
 		projMemRepo:        projMemRepo,
 		workspaceRepo:      workspaceRepo,
 		activityLogRepo:    activityLogRepo,
+		userRepo:           userRepo,
 	}
 }
 
@@ -108,17 +113,41 @@ func (s *roleService) validatePermissionIDs(ids []string) ([]string, *apperror.I
 	return found, nil
 }
 
-func (s *roleService) logActivity(workspaceID, userID, action string, entityID string, metadata map[string]interface{}) {
-	metaBytes, _ := json.Marshal(metadata)
-	metaStr := string(metaBytes)
+func (s *roleService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &workspaceID,
-		UserID:      &userID,
-		Action:      models.ActivityAction(action),
-		EntityType:  models.EntityTypeROLE,
-		EntityID:    entityID,
-		Metadata:    &metaStr,
+		WorkspaceID:    &workspaceID,
+		UserID:         &userID,
+		Action:         action,
+		EntityType:     models.EntityTypeROLE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *roleService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return userID
+	}
+	return u.FullName
 }
 
 func (s *roleService) ListRoles(workspaceID string, userID string, search string, page int, limit int) ([]dto.RoleSummary, *dto.Pagination, error) {
@@ -176,10 +205,14 @@ func (s *roleService) CreateRole(workspaceID string, userID string, req *dto.Cre
 	}
 
 	// BR-ROLE-07: log activity
-	s.logActivity(workspaceID, userID, "CREATE", role.ID, map[string]interface{}{
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
+		"event":            "role_created",
 		"name":             role.Name,
 		"permission_count": len(validatedPermIDs),
-	})
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+	s.logActivity(workspaceID, "", userID, role.ID, models.ActivityActionCREATE, meta, desc, nil)
 
 	var permissions map[string][]dto.PermissionInfo
 	var permissionCount int
@@ -229,7 +262,7 @@ func (s *roleService) UpdateRole(workspaceID string, userID string, roleID strin
 		return nil, apperror.ErrRoleNotFound
 	}
 
-	var oldName string
+	var roleChanges []activitylog.ChangeField
 	if req.Name != nil {
 		trimmed := strings.TrimSpace(*req.Name)
 		if err := s.validateRoleName(trimmed); err != nil {
@@ -238,10 +271,11 @@ func (s *roleService) UpdateRole(workspaceID string, userID string, roleID strin
 		if s.isRoleNameTaken(workspaceID, trimmed, roleID) {
 			return nil, apperror.ErrRoleNameAlreadyExists
 		}
-		oldName = role.Name
+		roleChanges = append(roleChanges, activitylog.BuildChangeField("name", role.Name, trimmed))
 		role.Name = trimmed
 	}
 	if req.Description != nil {
+		roleChanges = append(roleChanges, activitylog.BuildChangeField("description", role.Description, req.Description))
 		role.Description = req.Description
 	}
 	role.UpdatedAt = time.Now()
@@ -250,16 +284,11 @@ func (s *roleService) UpdateRole(workspaceID string, userID string, roleID strin
 	}
 
 	// BR-ROLE-07: log activity
-	if req.Name != nil {
-		s.logActivity(workspaceID, userID, "UPDATE", role.ID, map[string]interface{}{
-			"old_name": oldName,
-			"new_name": role.Name,
-		})
-	}
-	if req.Description != nil {
-		s.logActivity(workspaceID, userID, "UPDATE", role.ID, map[string]interface{}{
-			"field": "description",
-		})
+	if len(roleChanges) > 0 {
+		actorName := s.getUserName(userID)
+		meta := activitylog.TaskUpdated(roleChanges)
+		desc := activitylog.GenerateDescription(actorName, meta)
+		s.logActivity(workspaceID, "", userID, role.ID, models.ActivityActionUPDATE, meta, desc, nil)
 	}
 
 	rolePermissions, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -345,9 +374,14 @@ func (s *roleService) AssignPermissionsToRole(workspaceID string, userID string,
 		for i, p := range addedPermissions {
 			slugs[i] = p.Slug
 		}
-		s.logActivity(workspaceID, userID, "UPDATE", roleID, map[string]interface{}{
+		actorName := s.getUserName(userID)
+		meta := map[string]interface{}{
+			"event":       "permissions_assigned",
 			"added_slugs": slugs,
-		})
+			"action":      "gán quyền",
+		}
+		desc := activitylog.GenerateDescription(actorName, meta)
+		s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
 	}
 
 	allPerms, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -427,9 +461,14 @@ func (s *roleService) RemovePermissionsFromRole(workspaceID string, userID strin
 		for i, p := range removedPermissions {
 			slugs[i] = p.Slug
 		}
-		s.logActivity(workspaceID, userID, "UPDATE", roleID, map[string]interface{}{
+		actorName := s.getUserName(userID)
+		meta := map[string]interface{}{
+			"event":         "permissions_removed",
 			"removed_slugs": slugs,
-		})
+			"action":        "gỡ quyền",
+		}
+		desc := activitylog.GenerateDescription(actorName, meta)
+		s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
 	}
 
 	allPerms, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -486,10 +525,14 @@ func (s *roleService) DeleteRole(workspaceID string, userID string, roleID strin
 		return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete role")
 	}
 
-	s.logActivity(workspaceID, userID, "DELETE", roleID, map[string]interface{}{
-		"name":            role.Name,
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
+		"event":          "role_deleted",
+		"name":           role.Name,
 		"had_permissions": hadPerms,
-	})
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+	s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionDELETE, meta, desc, nil)
 
 	return nil
 }

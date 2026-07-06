@@ -27,6 +27,7 @@ type Container struct {
 
 	// Repositories
 	UserRepo                  repoInterface.UserRepository
+	SessionRepo               repoInterface.SessionRepository
 	WorkspaceRepo             repoInterface.WorkspaceRepository
 	PermissionRepo            repoInterface.PermissionRepository
 	RoleRepo                  repoInterface.RoleRepository
@@ -49,6 +50,7 @@ type Container struct {
 	AuthService            _interface.AuthService
 	UserService            _interface.UserService
 	SessionService         _interface.SessionService
+	AvatarStorage          _interface.AvatarStorageService
 	WorkspaceService       _interface.WorkspaceService
 	WorkspaceMemberService _interface.WorkspaceMemberService
 	WorkspaceInviteService _interface.WorkspaceInviteService
@@ -106,6 +108,7 @@ func NewContainer(db *gorm.DB) *Container {
 
 	// --- Initialize Repositories ---
 	c.UserRepo = repoImpl.NewUserRepository(db)
+	c.SessionRepo = repoImpl.NewSessionRepository(db)
 	c.WorkspaceRepo = repoImpl.NewWorkspaceRepository(db)
 	c.PermissionRepo = repoImpl.NewPermissionRepository(db)
 	c.RoleRepo = repoImpl.NewRoleRepository(db)
@@ -139,22 +142,23 @@ func NewContainer(db *gorm.DB) *Container {
 	c.NotifDispatcher = notif.NewDispatcher(c.NotificationRepo)
 
 	// --- Initialize Services ---
+	c.AvatarStorage = serviceImpl.NewAvatarStorageService()
 	c.AuthService = serviceImpl.NewAuthService(c.UserRepo)
-	c.UserService = serviceImpl.NewUserService(c.UserRepo)
-	c.SessionService = serviceImpl.NewSessionService(c.UserRepo)
-	c.WorkspaceService = serviceImpl.NewWorkspaceService(c.WorkspaceRepo, c.RoleRepo, c.RolePermissionRepo, dispatcher)
+	c.UserService = serviceImpl.NewUserService(c.UserRepo, c.SessionRepo, c.WorkspaceMemberRepo, c.AvatarStorage)
+	c.SessionService = serviceImpl.NewSessionService(c.SessionRepo)
+	c.WorkspaceService = serviceImpl.NewWorkspaceService(c.WorkspaceRepo, c.RoleRepo, c.RolePermissionRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.WorkspaceMemberService = serviceImpl.NewWorkspaceMemberService(c.WorkspaceMemberRepo, c.WorkspaceRepo, c.UserRepo, c.ProjectMemberRepo, tm, c.NotificationRepo, c.ActivityLogRepo)
 	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
 	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo)
-	c.RoleService = serviceImpl.NewRoleService(c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.ActivityLogRepo)
-	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo, c.ActivityLogRepo, dispatcher)
+	c.RoleService = serviceImpl.NewRoleService(c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.UserRepo)
+	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.ProjectMemberService = serviceImpl.NewProjectMemberService(c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
-	c.ColumnService = serviceImpl.NewColumnService(tm, c.ColumnRepo, c.ProjectRepo, c.ActivityLogRepo)
+	c.ColumnService = serviceImpl.NewColumnService(tm, c.ColumnRepo, c.ProjectRepo, c.ActivityLogRepo, c.UserRepo)
 	c.TaskService = serviceImpl.NewTaskService(tm, c.TaskRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.LabelRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
 	c.TaskAssigneeService = serviceImpl.NewTaskAssigneeService(c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.WorkspaceRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
 	c.TaskBoardService = serviceImpl.NewTaskBoardService(tm, c.TaskRepo, c.ColumnRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
-	c.LabelService = serviceImpl.NewLabelService(tm, c.LabelRepo, c.TaskLabelRepo, c.ProjectRepo, c.TaskRepo, c.ActivityLogRepo)
-	c.AttachmentService = serviceImpl.NewAttachmentService(c.AttachmentRepo, c.TaskRepo, c.ProjectRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.ProjectMemberRepo)
+	c.LabelService = serviceImpl.NewLabelService(tm, c.LabelRepo, c.TaskLabelRepo, c.ProjectRepo, c.TaskRepo, c.ActivityLogRepo, c.UserRepo)
+	c.AttachmentService = serviceImpl.NewAttachmentService(c.AttachmentRepo, c.TaskRepo, c.ProjectRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.ProjectMemberRepo, c.UserRepo)
 	c.CommentService = serviceImpl.NewCommentService(c.CommentRepo, c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.WorkspaceRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
 	c.NotificationService = serviceImpl.NewNotificationService(c.NotificationRepo, c.WorkspaceMemberRepo)
 	c.StorageService = serviceImpl.NewStorageService(c.AttachmentRepo, c.WorkspaceRepo)

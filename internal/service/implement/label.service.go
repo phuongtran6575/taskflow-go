@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
@@ -25,6 +26,7 @@ type labelService struct {
 	projectRepo     repoInterface.ProjectRepository
 	taskRepo        repoInterface.TaskRepository
 	activityLogRepo repoInterface.ActivityLogRepository
+	userRepo        repoInterface.UserRepository
 }
 
 func NewLabelService(
@@ -34,6 +36,7 @@ func NewLabelService(
 	projectRepo repoInterface.ProjectRepository,
 	taskRepo repoInterface.TaskRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
+	userRepo repoInterface.UserRepository,
 ) _interface.LabelService {
 	return &labelService{
 		tm:              tm,
@@ -42,6 +45,7 @@ func NewLabelService(
 		projectRepo:     projectRepo,
 		taskRepo:        taskRepo,
 		activityLogRepo: activityLogRepo,
+		userRepo:        userRepo,
 	}
 }
 
@@ -53,20 +57,41 @@ func normalizeColor(color string) string {
 	return color
 }
 
-func (s *labelService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}) {
-	metaJSON, err := json.Marshal(metadata)
+func (s *labelService) getUserName(userID string) string {
+	u, err := s.userRepo.GetByID(userID)
 	if err != nil {
-		return
+		return userID
 	}
-	metaStr := string(metaJSON)
+	return u.FullName
+}
+
+func (s *labelService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
-		WorkspaceID: &workspaceID,
-		ProjectID:   &projectID,
-		UserID:      &userID,
-		Action:      action,
-		EntityType:  models.EntityTypePROJECT,
-		EntityID:    entityID,
-		Metadata:    &metaStr,
+		WorkspaceID:    &workspaceID,
+		ProjectID:      &projectID,
+		UserID:         &userID,
+		Action:         action,
+		EntityType:     models.EntityTypeLABEL,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
 	})
 }
 
@@ -162,11 +187,14 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create label")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionCREATE, map[string]interface{}{
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
 		"event":       "label_created",
 		"label_name":  label.Name,
 		"label_color": label.Color,
-	})
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+	s.logActivity(workspaceID, projectID, userID, label.ID, models.ActivityActionCREATE, meta, desc, nil)
 
 	return &dto.LabelCreateResponse{
 		ID:        label.ID,
@@ -252,11 +280,14 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update label")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, map[string]interface{}{
-		"event":      "label_updated",
-		"label_id":   labelID,
-		"changes":    changes,
-	})
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
+		"event":    "label_updated",
+		"label_id": labelID,
+		"changes":  changes,
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+	s.logActivity(workspaceID, projectID, userID, labelID, models.ActivityActionUPDATE, meta, desc, nil)
 
 	taskLabels, _ := s.taskLabelRepo.ListByLabelID(labelID)
 	taskCount := len(taskLabels)
@@ -307,12 +338,15 @@ func (s *labelService) DeleteLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete label")
 	}
 
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionDELETE, map[string]interface{}{
-		"event":               "label_deleted",
-		"label_name":          label.Name,
-		"label_color":         label.Color,
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
+		"event":                "label_deleted",
+		"label_name":           label.Name,
+		"label_color":          label.Color,
 		"affected_tasks_count": affectedCount,
-	})
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+	s.logActivity(workspaceID, projectID, userID, labelID, models.ActivityActionDELETE, meta, desc, nil)
 
 	return &dto.LabelDeleteResponse{
 		Message:            fmt.Sprintf("Label '%s' has been deleted.", label.Name),
