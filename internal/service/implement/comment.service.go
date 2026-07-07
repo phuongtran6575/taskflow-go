@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/markdown"
 	"TaskFlow-Go/internal/models"
@@ -24,6 +25,7 @@ import (
 var mentionExtractRe = regexp.MustCompile(`@([a-zA-Z0-9_]{3,30})`)
 
 type commentService struct {
+	tm                *database.TransactionManager
 	commentRepo       repoInterface.CommentRepository
 	taskRepo          repoInterface.TaskRepository
 	projectRepo       repoInterface.ProjectRepository
@@ -37,6 +39,7 @@ type commentService struct {
 }
 
 func NewCommentService(
+	tm *database.TransactionManager,
 	commentRepo repoInterface.CommentRepository,
 	taskRepo repoInterface.TaskRepository,
 	projectRepo repoInterface.ProjectRepository,
@@ -49,6 +52,7 @@ func NewCommentService(
 	dispatcher *notif.Dispatcher,
 ) _interface.CommentService {
 	return &commentService{
+		tm:                tm,
 		commentRepo:       commentRepo,
 		taskRepo:          taskRepo,
 		projectRepo:       projectRepo,
@@ -220,6 +224,38 @@ func (s *commentService) logActivity(workspaceID, projectID, userID, entityID st
 	})
 }
 
+func (s *commentService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeCOMMENT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
+}
+
 func truncateContent(content string, maxLen int) string {
 	runes := []rune(content)
 	if len(runes) > maxLen {
@@ -282,16 +318,32 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		UserID:  &userID,
 		Content: content,
 	}
-	if err := s.commentRepo.Create(&comment); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create comment")
-	}
 
 	mentions, mentionedIDs := s.extractAndResolveMentions(workspaceID, projectID, content)
-	for _, mid := range mentionedIDs {
-		_ = s.commentRepo.CreateMention(&models.CommentMention{
-			CommentID: comment.ID,
-			UserID:    mid,
-		})
+	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
+	actorName := s.getUserName(userID)
+
+	meta := activitylog.CommentCreated(comment.ID, truncateContent(content, 50), len(mentionedIDs))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildCommentSnapshot(taskRef, task.Title)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Create(&comment).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create comment")
+		}
+		for _, mid := range mentionedIDs {
+			if err := tx.Create(&models.CommentMention{
+				CommentID: comment.ID,
+				UserID:    mid,
+			}).Error; err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create mention")
+			}
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, comment.ID, models.ActivityActionCREATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	mm := make([]markdown.MentionUser, len(mentions))
@@ -305,9 +357,6 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 		FullName: "",
 		Username: "",
 	}
-
-	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
-	actorName := s.getUserName(userID)
 
 	var mentionedNotified []string
 	for _, mid := range mentionedIDs {
@@ -360,11 +409,6 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 			TaskID:       taskID,
 		})
 	}
-
-	meta := activitylog.CommentCreated(comment.ID, truncateContent(content, 50), len(mentionedIDs))
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildCommentSnapshot(taskRef, task.Title)
-	s.logActivity(workspaceID, projectID, userID, comment.ID, models.ActivityActionCREATE, meta, desc, snap)
 
 	return &dto.CommentCreateResponse{
 		ID:          comment.ID,

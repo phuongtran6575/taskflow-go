@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
@@ -20,6 +21,7 @@ import (
 )
 
 type roleService struct {
+	tm                 *database.TransactionManager
 	roleRepo           repoInterface.RoleRepository
 	rolePermissionRepo repoInterface.RolePermissionRepository
 	permRepo           repoInterface.PermissionRepository
@@ -30,6 +32,7 @@ type roleService struct {
 }
 
 func NewRoleService(
+	tm *database.TransactionManager,
 	roleRepo repoInterface.RoleRepository,
 	rolePermissionRepo repoInterface.RolePermissionRepository,
 	permRepo repoInterface.PermissionRepository,
@@ -39,6 +42,7 @@ func NewRoleService(
 	userRepo repoInterface.UserRepository,
 ) _interface.RoleService {
 	return &roleService{
+		tm:                 tm,
 		roleRepo:           roleRepo,
 		rolePermissionRepo: rolePermissionRepo,
 		permRepo:           permRepo,
@@ -142,6 +146,35 @@ func (s *roleService) logActivity(workspaceID, projectID, userID, entityID strin
 	})
 }
 
+func (s *roleService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &workspaceID,
+		UserID:         &userID,
+		Action:         action,
+		EntityType:     models.EntityTypeROLE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
+}
+
 func (s *roleService) getUserName(userID string) string {
 	u, err := s.userRepo.GetByID(userID)
 	if err != nil {
@@ -189,30 +222,40 @@ func (s *roleService) CreateRole(workspaceID string, userID string, req *dto.Cre
 		}
 	}
 
-	role, err := s.roleRepo.Create(&models.Role{
-		Name:        req.Name,
-		Description: req.Description,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create role")
-	}
-
-	if len(validatedPermIDs) > 0 {
-		if err := s.rolePermissionRepo.BulkCreate(role.ID, validatedPermIDs); err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign permissions")
-		}
-	}
-
-	// BR-ROLE-07: log activity
 	actorName := s.getUserName(userID)
 	meta := map[string]interface{}{
 		"event":            "role_created",
-		"name":             role.Name,
+		"name":             req.Name,
 		"permission_count": len(validatedPermIDs),
 	}
 	desc := activitylog.GenerateDescription(actorName, meta)
-	s.logActivity(workspaceID, "", userID, role.ID, models.ActivityActionCREATE, meta, desc, nil)
+
+	var role *models.Role
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		r := &models.Role{
+			Name:        req.Name,
+			Description: req.Description,
+			WorkspaceID: workspaceID,
+		}
+		if err := tx.Create(r).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create role")
+		}
+		if len(validatedPermIDs) > 0 {
+			var rps []models.RolePermission
+			for _, pid := range validatedPermIDs {
+				rps = append(rps, models.RolePermission{RoleID: r.ID, PermissionID: pid})
+			}
+			if err := tx.Create(&rps).Error; err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign permissions")
+			}
+		}
+		role = r
+		s.logActivityInTx(tx, workspaceID, "", userID, r.ID, models.ActivityActionCREATE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	var permissions map[string][]dto.PermissionInfo
 	var permissionCount int
@@ -278,17 +321,22 @@ func (s *roleService) UpdateRole(workspaceID string, userID string, roleID strin
 		roleChanges = append(roleChanges, activitylog.BuildChangeField("description", role.Description, req.Description))
 		role.Description = req.Description
 	}
-	role.UpdatedAt = time.Now()
-	if err := s.roleRepo.Update(role); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update role")
-	}
+	actorName := s.getUserName(userID)
+	meta := activitylog.TaskUpdated(roleChanges)
+	desc := activitylog.GenerateDescription(actorName, meta)
 
-	// BR-ROLE-07: log activity
-	if len(roleChanges) > 0 {
-		actorName := s.getUserName(userID)
-		meta := activitylog.TaskUpdated(roleChanges)
-		desc := activitylog.GenerateDescription(actorName, meta)
-		s.logActivity(workspaceID, "", userID, role.ID, models.ActivityActionUPDATE, meta, desc, nil)
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		role.UpdatedAt = time.Now()
+		if err := tx.Save(role).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update role")
+		}
+		if len(roleChanges) > 0 {
+			s.logActivityInTx(tx, workspaceID, "", userID, role.ID, models.ActivityActionUPDATE, meta, desc, nil)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	rolePermissions, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -363,25 +411,32 @@ func (s *roleService) AssignPermissionsToRole(workspaceID string, userID string,
 		}, nil
 	}
 
-	if err := s.rolePermissionRepo.BulkCreate(roleID, toAdd); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign permissions")
-	}
-
-	// BR-ROLE-07: log activity
+	actorName := s.getUserName(userID)
 	addedPermissions, err := s.permRepo.GetListPermissions(toAdd)
-	if err == nil {
-		slugs := make([]string, len(addedPermissions))
-		for i, p := range addedPermissions {
-			slugs[i] = p.Slug
+	addedSlugs := make([]string, len(addedPermissions))
+	for i, p := range addedPermissions {
+		addedSlugs[i] = p.Slug
+	}
+	meta := map[string]interface{}{
+		"event":       "permissions_assigned",
+		"added_slugs": addedSlugs,
+		"action":      "gán quyền",
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var rps []models.RolePermission
+		for _, pid := range toAdd {
+			rps = append(rps, models.RolePermission{RoleID: roleID, PermissionID: pid})
 		}
-		actorName := s.getUserName(userID)
-		meta := map[string]interface{}{
-			"event":       "permissions_assigned",
-			"added_slugs": slugs,
-			"action":      "gán quyền",
+		if err := tx.Create(&rps).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign permissions")
 		}
-		desc := activitylog.GenerateDescription(actorName, meta)
-		s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
+		s.logActivityInTx(tx, workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	allPerms, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -450,25 +505,29 @@ func (s *roleService) RemovePermissionsFromRole(workspaceID string, userID strin
 		}, nil
 	}
 
-	if err := s.rolePermissionRepo.BulkDelete(roleID, toRemove); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to remove permissions")
-	}
-
-	// BR-ROLE-07: log activity
+	actorName := s.getUserName(userID)
 	removedPermissions, err := s.permRepo.GetListPermissions(toRemove)
-	if err == nil {
-		slugs := make([]string, len(removedPermissions))
-		for i, p := range removedPermissions {
-			slugs[i] = p.Slug
+	removedSlugs := make([]string, len(removedPermissions))
+	for i, p := range removedPermissions {
+		removedSlugs[i] = p.Slug
+	}
+	meta := map[string]interface{}{
+		"event":         "permissions_removed",
+		"removed_slugs": removedSlugs,
+		"action":        "gỡ quyền",
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Where("role_id = ? AND permission_id IN ?", roleID, toRemove).
+			Delete(&models.RolePermission{}).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to remove permissions")
 		}
-		actorName := s.getUserName(userID)
-		meta := map[string]interface{}{
-			"event":         "permissions_removed",
-			"removed_slugs": slugs,
-			"action":        "gỡ quyền",
-		}
-		desc := activitylog.GenerateDescription(actorName, meta)
-		s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
+		s.logActivityInTx(tx, workspaceID, "", userID, roleID, models.ActivityActionUPDATE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	allPerms, err := s.rolePermissionRepo.GetPermissionsByRoleID(roleID)
@@ -520,11 +579,6 @@ func (s *roleService) DeleteRole(workspaceID string, userID string, roleID strin
 		}
 	}
 
-	// BR-ROLE-03: hard delete (DeletedAt removed from model)
-	if err := s.roleRepo.Delete(roleID); err != nil {
-		return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete role")
-	}
-
 	actorName := s.getUserName(userID)
 	meta := map[string]interface{}{
 		"event":          "role_deleted",
@@ -532,7 +586,18 @@ func (s *roleService) DeleteRole(workspaceID string, userID string, roleID strin
 		"had_permissions": hadPerms,
 	}
 	desc := activitylog.GenerateDescription(actorName, meta)
-	s.logActivity(workspaceID, "", userID, roleID, models.ActivityActionDELETE, meta, desc, nil)
+
+	// BR-ROLE-03: hard delete (DeletedAt removed from model)
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Delete(&models.Role{}, "id = ?", roleID).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete role")
+		}
+		s.logActivityInTx(tx, workspaceID, "", userID, roleID, models.ActivityActionDELETE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

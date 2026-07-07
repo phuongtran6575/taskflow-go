@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	"TaskFlow-Go/internal/notif"
@@ -19,6 +20,7 @@ import (
 )
 
 type projectMemberService struct {
+	tm                 *database.TransactionManager
 	memberRepo         repoInterface.ProjectMemberRepository
 	wsMemberRepo       repoInterface.WorkspaceMemberRepository
 	workspaceRepo      repoInterface.WorkspaceRepository
@@ -31,6 +33,7 @@ type projectMemberService struct {
 }
 
 func NewProjectMemberService(
+	tm *database.TransactionManager,
 	memberRepo repoInterface.ProjectMemberRepository,
 	wsMemberRepo repoInterface.WorkspaceMemberRepository,
 	workspaceRepo repoInterface.WorkspaceRepository,
@@ -42,6 +45,7 @@ func NewProjectMemberService(
 	dispatcher *notif.Dispatcher,
 ) _interface.ProjectMemberService {
 	return &projectMemberService{
+		tm:              tm,
 		memberRepo:      memberRepo,
 		wsMemberRepo:    wsMemberRepo,
 		workspaceRepo:   workspaceRepo,
@@ -113,6 +117,38 @@ func (s *projectMemberService) logActivity(workspaceID, projectID, userID, entit
 		Metadata:       metaStr,
 		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *projectMemberService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypePROJECT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
 }
 
 func (s *projectMemberService) getUserName(userID string) string {
@@ -235,9 +271,30 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 		}, nil
 	}
 
-	createdMembers, err := s.memberRepo.BulkAddMember(projectID, toAdd)
+	actorName := s.getUserName(userID)
+	addedUserInfo := make([]map[string]string, 0, len(toAdd))
+	for _, m := range toAdd {
+		addedUserInfo = append(addedUserInfo, map[string]string{
+			"user_id": m.UserID,
+			"role_id": m.RoleID,
+		})
+	}
+	meta := activitylog.ProjectMemberAdded(addedUserInfo)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+
+	var createdMembers []models.ProjectMember
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		var innerErr error
+		createdMembers, innerErr = s.memberRepo.BulkAddMember(projectID, toAdd)
+		if innerErr != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to add members")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, projectID, models.ActivityActionCREATE, meta, desc, snap)
+		return nil
+	})
 	if err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to add members")
+		return nil, err
 	}
 
 	// Fetch role names for response and notification
@@ -251,7 +308,6 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 	}
 
 	var addedInfos []dto.AddedMemberInfo
-	addedUserInfo := make([]map[string]string, 0, len(createdMembers))
 	for _, cm := range createdMembers {
 		roleName := ""
 		if cm.RoleID != nil {
@@ -277,19 +333,7 @@ func (s *projectMemberService) AddMembersToProject(workspaceID string, userID st
 			WorkspaceID: workspaceID,
 			ProjectID:   projectID,
 		})
-
-		addedUserInfo = append(addedUserInfo, map[string]string{
-			"user_id":   cm.UserID,
-			"role_name": roleName,
-		})
 	}
-
-	// BR-PRA-08: Activity log cho member_added
-	actorName := s.getUserName(userID)
-	meta := activitylog.ProjectMemberAdded(addedUserInfo)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionCREATE, meta, desc, snap)
 
 	return &dto.AddMembersResponse{
 		Added:                addedInfos,
@@ -343,11 +387,30 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 		}
 	}
 
-	if err := s.memberRepo.UpdateRole(projectID, targetUserID, req.RoleID); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update role")
+	prevRoleName := ""
+	if prevRoleRef != nil {
+		prevRoleName = prevRoleRef.Name
+	}
+	actorName := s.getUserName(userID)
+	targetFullName := s.getUserName(targetUserID)
+	meta := activitylog.ProjectRoleChanged(targetUserID, targetFullName, prevRoleName, req.RoleID)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.ProjectMember{}).
+			Where("project_id = ? AND user_id = ?", projectID, targetUserID).
+			Update("role_id", req.RoleID).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update role")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	updatedMember, err := 	s.memberRepo.GetByIDWithRelationRole(projectID, targetUserID)
+	updatedMember, err := s.memberRepo.GetByIDWithRelationRole(projectID, targetUserID)
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get updated member")
 	}
@@ -360,29 +423,18 @@ func (s *projectMemberService) UpdateMemberRole(workspaceID string, userID strin
 		}
 	}
 
-	// BR-PRA-07: Gửi notification STATUS_CHANGED
-	oldRoleName := ""
-	if prevRoleRef != nil {
-		oldRoleName = prevRoleRef.Name
-	}
 	newRoleName := ""
 	if currentRoleRef != nil {
 		newRoleName = currentRoleRef.Name
 	}
+
+	// BR-PRA-07: Gửi notification STATUS_CHANGED
 	s.sendNotification(
 		targetUserID, userID,
 		models.NotificationTypeANNOUNCEMENT,
 		fmt.Sprintf("Role của bạn trong %s đã thay đổi", project.Name),
-		fmt.Sprintf("Role của bạn được đổi từ %s sang %s.", oldRoleName, newRoleName),
+		fmt.Sprintf("Role của bạn được đổi từ %s sang %s.", prevRoleName, newRoleName),
 	)
-
-	// BR-PRA-08: Activity log cho role_changed
-	actorName := s.getUserName(userID)
-	targetFullName := s.getUserName(targetUserID)
-	meta := activitylog.ProjectRoleChanged(targetUserID, targetFullName, oldRoleName, newRoleName)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.UpdateProjectMemberRoleResponse{
 		UserID:       member.UserID,
@@ -427,17 +479,23 @@ func (s *projectMemberService) RemoveMemberFromProject(workspaceID string, userI
 		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
 	)
 
-	if err := s.memberRepo.Delete(projectID, targetUserID); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to remove member")
-	}
-
-	// BR-PRA-08: Activity log cho member_removed
 	actorName := s.getUserName(userID)
 	targetFullName := s.getUserName(targetUserID)
 	meta := activitylog.ProjectMemberRemoved(targetUserID, targetFullName, "manager")
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Where("project_id = ? AND user_id = ?", projectID, targetUserID).
+			Delete(&models.ProjectMember{}).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to remove member")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &dto.RemoveProjectMemberResponse{
 		Message:       "Member has been removed from the project.",
@@ -478,17 +536,23 @@ func (s *projectMemberService) LeaveProject(workspaceID string, userID string, p
 		fmt.Sprintf("Bạn không còn là thành viên của project %s.", project.Name),
 	)
 
-	if err := s.memberRepo.Delete(projectID, userID); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to leave project")
-	}
-
-	// BR-PRA-08: Activity log cho member_removed (self)
 	actorName := s.getUserName(userID)
 	selfFullName := s.getUserName(userID)
 	meta := activitylog.ProjectMemberRemoved(userID, selfFullName, "self")
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Where("project_id = ? AND user_id = ?", projectID, userID).
+			Delete(&models.ProjectMember{}).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to leave project")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, projectID, models.ActivityActionUPDATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &dto.LeaveProjectResponse{
 		Message:       "You have left the project successfully.",

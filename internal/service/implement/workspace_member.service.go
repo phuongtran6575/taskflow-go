@@ -195,6 +195,12 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 		}
 	}
 
+	actorName := s.getUserName(userID)
+	targetName := s.getUserName(req.NewOwnerID)
+	meta := activitylog.OwnershipTransferred(userID, actorName, req.NewOwnerID, targetName)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+
 	err = s.tm.Execute(func(tx *gorm.DB) error {
 		memberTx := s.memberRepo.WithTx(tx)
 		wsTx := s.workspaceRepo.WithTx(tx)
@@ -211,6 +217,7 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update workspace owner")
 		}
 
+		s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -228,13 +235,6 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 	if err := s.notifRepo.Create(notification, []string{req.NewOwnerID}); err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
 	}
-
-	actorName := s.getUserName(userID)
-	targetName := s.getUserName(req.NewOwnerID)
-	meta := activitylog.OwnershipTransferred(userID, actorName, req.NewOwnerID, targetName)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.TransferOwnershipResponse{
 		Message: "Ownership transferred successfully.",
@@ -381,6 +381,37 @@ func (s *workspaceMemberService) logActivity(workspaceID, projectID, userID, ent
 		Metadata:       metaStr,
 		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *workspaceMemberService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeWORKSPACE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
 }
 
 func (s *workspaceMemberService) getUserName(userID string) string {

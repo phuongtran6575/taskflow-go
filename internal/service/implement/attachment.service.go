@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
@@ -30,6 +31,7 @@ const (
 )
 
 type attachmentService struct {
+	tm                *database.TransactionManager
 	attachmentRepo    repoInterface.AttachmentRepository
 	taskRepo          repoInterface.TaskRepository
 	projectRepo       repoInterface.ProjectRepository
@@ -40,6 +42,7 @@ type attachmentService struct {
 }
 
 func NewAttachmentService(
+	tm *database.TransactionManager,
 	attachmentRepo repoInterface.AttachmentRepository,
 	taskRepo repoInterface.TaskRepository,
 	projectRepo repoInterface.ProjectRepository,
@@ -49,6 +52,7 @@ func NewAttachmentService(
 	userRepo repoInterface.UserRepository,
 ) _interface.AttachmentService {
 	return &attachmentService{
+		tm:                tm,
 		attachmentRepo:    attachmentRepo,
 		taskRepo:          taskRepo,
 		projectRepo:       projectRepo,
@@ -208,7 +212,13 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 		}
 	}
 
-	var uploaded []dto.UploadedFileInfo
+	type pendingUpload struct {
+		attachment  models.Attachment
+		fileGroup   string
+		thumbnailURL *string
+		origName    string
+	}
+	var pending []pendingUpload
 	var failed []dto.FailedFile
 	failed = append(failed, preFailed...)
 
@@ -262,23 +272,14 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 
 		now := time.Now()
 		attachment := models.Attachment{
-			ID:        attID,
-			TaskID:    taskID,
+			ID:         attID,
+			TaskID:     taskID,
 			UploaderID: &userID,
-			FileName:  vf.sanitizedName,
-			FileURL:   savePath,
-			FileType:  vf.ext,
-			SizeBytes: vf.header.Size,
-			CreatedAt: now,
-		}
-		if err := s.attachmentRepo.Create(&attachment); err != nil {
-			failed = append(failed, dto.FailedFile{
-				FileName: vf.header.Filename,
-				Reason:   "UPLOAD_FAILED",
-				Message:  "Failed to save attachment record.",
-			})
-			os.Remove(savePath)
-			continue
+			FileName:   vf.sanitizedName,
+			FileURL:    savePath,
+			FileType:   vf.ext,
+			SizeBytes:  vf.header.Size,
+			CreatedAt:  now,
 		}
 
 		fileGroup := helper.ClassifyFileType(vf.ext)
@@ -288,31 +289,23 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 			thumbnailURL = &url
 		}
 
-		uploaded = append(uploaded, dto.UploadedFileInfo{
-			ID:        attID,
-			FileName:  vf.sanitizedName,
-			FileType:  vf.ext,
-			FileGroup: fileGroup,
-			SizeBytes: vf.header.Size,
-			SizeDisplay: helper.FormatSizeDisplay(vf.header.Size),
-			ThumbnailURL: thumbnailURL,
-			Uploader: dto.AttachmentUploader{
-				UserID:   userID,
-				FullName: "",
-			},
-			CreatedAt: now.Format(time.RFC3339),
+		pending = append(pending, pendingUpload{
+			attachment:   attachment,
+			fileGroup:    fileGroup,
+			thumbnailURL: thumbnailURL,
+			origName:     vf.header.Filename,
 		})
 	}
 
 	ref := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
 
-	if len(uploaded) > 0 {
+	if len(pending) > 0 {
 		var fileInfos []map[string]interface{}
-		for _, u := range uploaded {
+		for _, p := range pending {
 			fileInfos = append(fileInfos, map[string]interface{}{
-				"file_name":  u.FileName,
-				"size_bytes": u.SizeBytes,
-				"file_type":  u.FileType,
+				"file_name":  p.attachment.FileName,
+				"size_bytes": p.attachment.SizeBytes,
+				"file_type":  p.attachment.FileType,
 			})
 		}
 		actorName := s.getUserName(userID)
@@ -323,7 +316,40 @@ func (s *attachmentService) UploadAttachments(workspaceID string, userID string,
 		}
 		desc := activitylog.GenerateDescription(actorName, meta)
 		snap := activitylog.BuildTaskSnapshot(ref, task.Title, project.Key)
-		s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionCREATE, meta, desc, snap)
+
+		err = s.tm.Execute(func(tx *gorm.DB) error {
+			for _, p := range pending {
+				if err := tx.Create(&p.attachment).Error; err != nil {
+					return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to save attachment record")
+				}
+			}
+			s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionCREATE, meta, desc, snap)
+			return nil
+		})
+		if err != nil {
+			for _, p := range pending {
+				os.Remove(p.attachment.FileURL)
+			}
+			return nil, err
+		}
+	}
+
+	var uploaded []dto.UploadedFileInfo
+	for _, p := range pending {
+		uploaded = append(uploaded, dto.UploadedFileInfo{
+			ID:        p.attachment.ID,
+			FileName:  p.attachment.FileName,
+			FileType:  p.attachment.FileType,
+			FileGroup: p.fileGroup,
+			SizeBytes: p.attachment.SizeBytes,
+			SizeDisplay: helper.FormatSizeDisplay(p.attachment.SizeBytes),
+			ThumbnailURL: p.thumbnailURL,
+			Uploader: dto.AttachmentUploader{
+				UserID:   userID,
+				FullName: "",
+			},
+			CreatedAt: p.attachment.CreatedAt.Format(time.RFC3339),
+		})
 	}
 
 	return &dto.UploadAttachmentsResponse{
@@ -465,6 +491,38 @@ func (s *attachmentService) logActivity(workspaceID, projectID, userID, entityID
 		Metadata:       metaStr,
 		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *attachmentService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeTASK,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
 }
 
 func (s *attachmentService) getUserName(userID string) string {

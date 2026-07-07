@@ -210,6 +210,38 @@ func (s *projectService) logActivity(workspaceID, projectID, userID, entityID st
 	})
 }
 
+func (s *projectService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypePROJECT,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
+}
+
 func (s *projectService) getUserName(userID string) string {
 	u, err := s.userRepo.GetByID(userID)
 	if err != nil {
@@ -321,7 +353,7 @@ func (s *projectService) CreateProject(workspaceID string, userID string, req *d
 		meta := activitylog.ProjectCreated(req.Name, key)
 		desc := activitylog.GenerateDescription(actorName, meta)
 		snap := activitylog.BuildProjectSnapshot(req.Name, key)
-		s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionCREATE, meta, desc, snap)
+		s.logActivityInTx(tx, workspaceID, project.ID, userID, project.ID, models.ActivityActionCREATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -412,17 +444,23 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 		project.Icon = req.Icon
 	}
 
-	project.UpdatedAt = time.Now()
-	if err := s.projectRepo.Update(project); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update project")
-	}
+	actorName := s.getUserName(userID)
+	meta := activitylog.ProjectUpdated(changes)
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
 
-	if len(changes) > 0 {
-		actorName := s.getUserName(userID)
-		meta := activitylog.ProjectUpdated(changes)
-		desc := activitylog.GenerateDescription(actorName, meta)
-		snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-		s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		project.UpdatedAt = time.Now()
+		if err := s.projectRepo.WithTx(tx).Update(project); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update project")
+		}
+		if len(changes) > 0 {
+			s.logActivityInTx(tx, workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &dto.UpdateProjectResponse{
@@ -444,26 +482,34 @@ func (s *projectService) ArchiveProject(workspaceID string, userID string, proje
 		return nil, apperror.ErrAlreadyArchived
 	}
 
-	now := time.Now()
-	project.IsArchived = true
-	project.ArchivedAt = &now
-	project.ArchivedByID = &userID
-	project.UpdatedAt = now
-	if err := s.projectRepo.Update(project); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to archive project")
-	}
-
 	actorName := s.getUserName(userID)
 	meta := activitylog.ProjectArchived()
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+
+	var archivedAt time.Time
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		now := time.Now()
+		archivedAt = now
+		project.IsArchived = true
+		project.ArchivedAt = &now
+		project.ArchivedByID = &userID
+		project.UpdatedAt = now
+		if err := s.projectRepo.WithTx(tx).Update(project); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to archive project")
+		}
+		s.logActivityInTx(tx, workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &dto.ArchiveProjectResponse{
 		ID:         project.ID,
 		Name:       project.Name,
 		IsArchived: true,
-		ArchivedAt: now,
+		ArchivedAt: archivedAt,
 		ArchivedBy: userID,
 	}, nil
 }
@@ -477,25 +523,34 @@ func (s *projectService) UnarchiveProject(workspaceID string, userID string, pro
 		return nil, apperror.ErrNotArchived
 	}
 
-	project.IsArchived = false
-	project.ArchivedAt = nil
-	project.ArchivedByID = nil
-	project.UpdatedAt = time.Now()
-	if err := s.projectRepo.Update(project); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unarchive project")
-	}
-
 	actorName := s.getUserName(userID)
 	meta := activitylog.ProjectUnarchived()
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+
+	var unarchivedAt time.Time
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		now := time.Now()
+		unarchivedAt = now
+		project.IsArchived = false
+		project.ArchivedAt = nil
+		project.ArchivedByID = nil
+		project.UpdatedAt = now
+		if err := s.projectRepo.WithTx(tx).Update(project); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unarchive project")
+		}
+		s.logActivityInTx(tx, workspaceID, project.ID, userID, project.ID, models.ActivityActionUPDATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &dto.UnarchiveProjectResponse{
 		ID:           project.ID,
 		Name:         project.Name,
 		IsArchived:   false,
-		UnarchivedAt: project.UpdatedAt,
+		UnarchivedAt: unarchivedAt,
 		UnarchivedBy: userID,
 	}, nil
 }
@@ -536,17 +591,23 @@ func (s *projectService) DeleteProject(workspaceID string, userID string, projec
 
 	taskCount, _ := s.projectRepo.CountTasksByProject(projectID)
 
-	if err := s.projectRepo.Delete(projectID); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete project")
-	}
-
-	s.dispatcher.CascadeSoftDeleteProject(projectID)
-
 	actorName := s.getUserName(userID)
 	meta := activitylog.ProjectDeleted(project.Name, project.Key, int(taskCount))
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildProjectSnapshot(project.Name, project.Key)
-	s.logActivity(workspaceID, project.ID, userID, project.ID, models.ActivityActionDELETE, meta, desc, snap)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.projectRepo.WithTx(tx).Delete(projectID); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete project")
+		}
+		s.logActivityInTx(tx, workspaceID, project.ID, userID, project.ID, models.ActivityActionDELETE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.dispatcher.CascadeSoftDeleteProject(projectID)
 
 	return &dto.ProjectDeleteResponse{
 		Message:          "Project '" + project.Name + "' has been deleted successfully.",

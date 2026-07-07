@@ -57,6 +57,36 @@ func normalizeColor(color string) string {
 	return color
 }
 
+func (s *labelService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &workspaceID,
+		ProjectID:      &projectID,
+		UserID:         &userID,
+		Action:         action,
+		EntityType:     models.EntityTypeLABEL,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
+}
+
 func (s *labelService) getUserName(userID string) string {
 	u, err := s.userRepo.GetByID(userID)
 	if err != nil {
@@ -183,9 +213,6 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		Color:     color,
 		ProjectID: projectID,
 	}
-	if err := s.labelRepo.Create(&label); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create label")
-	}
 
 	actorName := s.getUserName(userID)
 	meta := map[string]interface{}{
@@ -194,7 +221,17 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		"label_color": label.Color,
 	}
 	desc := activitylog.GenerateDescription(actorName, meta)
-	s.logActivity(workspaceID, projectID, userID, label.ID, models.ActivityActionCREATE, meta, desc, nil)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		if err := tx.Create(&label).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create label")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, label.ID, models.ActivityActionCREATE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &dto.LabelCreateResponse{
 		ID:        label.ID,
@@ -275,11 +312,6 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		}, nil
 	}
 
-	label.UpdatedAt = time.Now()
-	if err := s.labelRepo.Update(label); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update label")
-	}
-
 	actorName := s.getUserName(userID)
 	meta := map[string]interface{}{
 		"event":    "label_updated",
@@ -287,7 +319,18 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		"changes":  changes,
 	}
 	desc := activitylog.GenerateDescription(actorName, meta)
-	s.logActivity(workspaceID, projectID, userID, labelID, models.ActivityActionUPDATE, meta, desc, nil)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		label.UpdatedAt = time.Now()
+		if err := tx.Save(&label).Error; err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update label")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, labelID, models.ActivityActionUPDATE, meta, desc, nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	taskLabels, _ := s.taskLabelRepo.ListByLabelID(labelID)
 	taskCount := len(taskLabels)
@@ -322,6 +365,15 @@ func (s *labelService) DeleteLabel(workspaceID string, userID string, projectID 
 	}
 
 	var affectedCount int64
+	actorName := s.getUserName(userID)
+	meta := map[string]interface{}{
+		"event":                "label_deleted",
+		"label_name":           label.Name,
+		"label_color":          label.Color,
+		"affected_tasks_count": affectedCount,
+	}
+	desc := activitylog.GenerateDescription(actorName, meta)
+
 	err = s.tm.Execute(func(tx *gorm.DB) error {
 		var count int64
 		if err := tx.Model(&models.TaskLabel{}).Where("label_id = ?", labelID).Count(&count).Error; err != nil {
@@ -332,21 +384,12 @@ func (s *labelService) DeleteLabel(workspaceID string, userID string, projectID 
 		if err := tx.Delete(&models.Label{}, "id = ?", labelID).Error; err != nil {
 			return err
 		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, labelID, models.ActivityActionDELETE, meta, desc, nil)
 		return nil
 	})
 	if err != nil {
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete label")
 	}
-
-	actorName := s.getUserName(userID)
-	meta := map[string]interface{}{
-		"event":                "label_deleted",
-		"label_name":           label.Name,
-		"label_color":          label.Color,
-		"affected_tasks_count": affectedCount,
-	}
-	desc := activitylog.GenerateDescription(actorName, meta)
-	s.logActivity(workspaceID, projectID, userID, labelID, models.ActivityActionDELETE, meta, desc, nil)
 
 	return &dto.LabelDeleteResponse{
 		Message:            fmt.Sprintf("Label '%s' has been deleted.", label.Name),

@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/job"
@@ -23,6 +24,7 @@ import (
 )
 
 type workspaceService struct {
+	tm                 *database.TransactionManager
 	workspaceRepo      repoInterface.WorkspaceRepository
 	roleRepo           repoInterface.RoleRepository
 	rolePermissionRepo repoInterface.RolePermissionRepository
@@ -32,6 +34,7 @@ type workspaceService struct {
 }
 
 func NewWorkspaceService(
+	tm *database.TransactionManager,
 	workspaceRepo repoInterface.WorkspaceRepository,
 	roleRepo repoInterface.RoleRepository,
 	rolePermissionRepo repoInterface.RolePermissionRepository,
@@ -40,6 +43,7 @@ func NewWorkspaceService(
 	dispatcher *job.Dispatcher,
 ) _interface.WorkspaceService {
 	return &workspaceService{
+		tm:                 tm,
 		workspaceRepo:      workspaceRepo,
 		roleRepo:           roleRepo,
 		rolePermissionRepo: rolePermissionRepo,
@@ -93,29 +97,36 @@ func (s *workspaceService) CreateWorkspace(userID string, req *dto.CreateWorkspa
 		Name:    req.Name,
 		Domain:  req.Domain,
 	}
-	if err := s.workspaceRepo.Create(workspace); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to create workspace")
-	}
 
-	if err := s.workspaceRepo.AddMember(&models.WorkspaceMember{
-		WorkspaceID: workspace.ID,
-		UserID:      userID,
-		Role:        models.WorkspaceRoleOWNER,
-		JoinedAt:    time.Now(),
-	}); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to add workspace owner")
+	actorName := s.getUserName(userID)
+	meta := activitylog.WorkspaceCreated(workspace.Name, string(workspace.Plan))
+	desc := activitylog.GenerateDescription(actorName, meta)
+	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+
+	err = s.tm.Execute(func(tx *gorm.DB) error {
+		wsTx := s.workspaceRepo.WithTx(tx)
+		if err := wsTx.Create(workspace); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to create workspace")
+		}
+		if err := wsTx.AddMember(&models.WorkspaceMember{
+			WorkspaceID: workspace.ID,
+			UserID:      userID,
+			Role:        models.WorkspaceRoleOWNER,
+			JoinedAt:    time.Now(),
+		}); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to add workspace owner")
+		}
+		s.logActivityInTx(tx, workspace.ID, "", userID, workspace.ID, models.ActivityActionCREATE, meta, desc, snap)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// BR-ROLE-08: Seed default roles (Manager, Developer, Viewer)
 	if err := s.seedDefaultRoles(workspace.ID); err != nil {
 		return nil, err
 	}
-
-	actorName := s.getUserName(userID)
-	meta := activitylog.WorkspaceCreated(workspace.Name, string(workspace.Plan))
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-	s.logActivity(workspace.ID, "", userID, workspace.ID, models.ActivityActionCREATE, meta, desc, snap)
 
 	return &dto.WorkspaceCreateResponse{
 		ID:        workspace.ID,
@@ -426,6 +437,37 @@ func (s *workspaceService) logActivity(workspaceID, projectID, userID, entityID 
 		Metadata:       metaStr,
 		EntitySnapshot: snapStr,
 	})
+}
+
+func (s *workspaceService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeWORKSPACE,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	}).Error
 }
 
 func (s *workspaceService) getUserName(userID string) string {
