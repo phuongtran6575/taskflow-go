@@ -9,6 +9,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/helper"
+
 	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
@@ -106,18 +108,6 @@ func (s *taskAssigneeService) getUserName(userID string) string {
 		return userID
 	}
 	return u.FullName
-}
-
-func (s *taskAssigneeService) dedupStrings(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if _, ok := seen[item]; !ok {
-			seen[item] = struct{}{}
-			result = append(result, item)
-		}
-	}
-	return result
 }
 
 func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
@@ -220,7 +210,7 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 	}
 
 	// BR-ASSIGN-02: Validate batch — dedup + check project_members OR workspace OWNER
-	deduped := s.dedupStrings(req.UserIDs)
+	deduped := helper.DedupStrings(req.UserIDs)
 
 	validIDs, err := s.projectMemberRepo.ListMemberIDs(projectID)
 	if err != nil {

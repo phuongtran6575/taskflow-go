@@ -14,6 +14,7 @@ import (
 	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/markdown"
 	"TaskFlow-Go/internal/models"
 	"TaskFlow-Go/internal/notif"
@@ -256,14 +257,6 @@ func (s *commentService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, us
 	}).Error
 }
 
-func truncateContent(content string, maxLen int) string {
-	runes := []rune(content)
-	if len(runes) > maxLen {
-		return string(runes[:maxLen]) + "..."
-	}
-	return content
-}
-
 func (s *commentService) ListComments(workspaceID string, userID string, projectID string, taskID string, limit int, cursor string, direction string) (*dto.CommentListResponse, error) {
 	_, err := s.getProjectOrFail(workspaceID, projectID)
 	if err != nil {
@@ -323,7 +316,7 @@ func (s *commentService) CreateComment(workspaceID string, userID string, projec
 	taskRef := fmt.Sprintf("%s-%d", project.Key, task.TaskNumber)
 	actorName := s.getUserName(userID)
 
-	meta := activitylog.CommentCreated(comment.ID, truncateContent(content, 50), len(mentionedIDs))
+	meta := activitylog.CommentCreated(comment.ID, helper.TruncateContent(content, 50), len(mentionedIDs))
 	desc := activitylog.GenerateDescription(actorName, meta)
 	snap := activitylog.BuildCommentSnapshot(taskRef, task.Title)
 

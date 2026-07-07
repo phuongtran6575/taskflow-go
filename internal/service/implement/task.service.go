@@ -13,7 +13,9 @@ import (
 
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/validator"
 	"TaskFlow-Go/internal/notif"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -165,18 +167,6 @@ func (s *taskService) getUserName(userID string) string {
 	return u.FullName
 }
 
-func (s *taskService) dedupStrings(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if _, ok := seen[item]; !ok {
-			seen[item] = struct{}{}
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
 func (s *taskService) validateColumn(projectID, columnID string) error {
 	column, err := s.columnRepo.GetByID(columnID)
 	if err != nil {
@@ -212,23 +202,11 @@ func (s *taskService) validateProjectNotArchived(projectID string) error {
 	return nil
 }
 
-func (s *taskService) validatePriority(priority string) error {
-	if priority == "" {
-		return nil
-	}
-	switch models.TaskPriority(priority) {
-	case models.TaskPriorityLOW, models.TaskPriorityMED, models.TaskPriorityHIGH, models.TaskPriorityURGENT:
-		return nil
-	default:
-		return apperror.ErrInvalidPriority
-	}
-}
-
 func (s *taskService) validateAssignees(workspaceID, projectID string, assigneeIDs []string) ([]string, error) {
 	if len(assigneeIDs) == 0 {
 		return nil, nil
 	}
-	deduped := s.dedupStrings(assigneeIDs)
+	deduped := helper.DedupStrings(assigneeIDs)
 
 	validIDs, err := s.projectMemberRepo.ListMemberIDs(projectID)
 	if err != nil {
@@ -263,7 +241,7 @@ func (s *taskService) validateLabels(projectID string, labelIDs []string) ([]str
 	if len(labelIDs) == 0 {
 		return nil, nil
 	}
-	deduped := s.dedupStrings(labelIDs)
+	deduped := helper.DedupStrings(labelIDs)
 
 	projectLabels, err := s.labelRepo.ListByProjectID(projectID)
 	if err != nil {
@@ -379,7 +357,7 @@ func (s *taskService) CreateTask(workspaceID string, userID string, projectID st
 		return nil, err
 	}
 
-	if err := s.validatePriority(req.Priority); err != nil {
+	if err := validator.ValidateTaskPriority(req.Priority); err != nil {
 		return nil, err
 	}
 
@@ -575,7 +553,7 @@ func (s *taskService) UpdateTask(workspaceID string, userID string, projectID st
 	}
 
 	if req.Priority != nil {
-		if err := s.validatePriority(*req.Priority); err != nil {
+		if err := validator.ValidateTaskPriority(*req.Priority); err != nil {
 			return nil, err
 		}
 		if *req.Priority != string(task.Priority) {
@@ -745,7 +723,7 @@ func (s *taskService) CreateSubtask(workspaceID string, userID string, projectID
 		return nil, err
 	}
 
-	if err := s.validatePriority(req.Priority); err != nil {
+	if err := validator.ValidateTaskPriority(req.Priority); err != nil {
 		return nil, err
 	}
 

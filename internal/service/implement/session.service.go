@@ -1,9 +1,8 @@
 package implement
 
 import (
-	"strings"
-
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -15,14 +14,6 @@ type sessionService struct {
 
 func NewSessionService(sessionRepo repoInterface.SessionRepository) _interface.SessionService {
 	return &sessionService{sessionRepo: sessionRepo}
-}
-
-func maskIP(ip string) string {
-	parts := strings.Split(ip, ".")
-	if len(parts) != 4 {
-		return ip
-	}
-	return parts[0] + "." + parts[1] + ".x.x"
 }
 
 func (s *sessionService) GetSessionsByUserId(userID string) (*dto.SessionListResponse, error) {
@@ -44,7 +35,7 @@ func (s *sessionService) GetSessionsByUserId(userID string) (*dto.SessionListRes
 				CreatedAt: sess.CreatedAt,
 				ExpiresAt: sess.ExpiresAt,
 				UserAgent: sess.UserAgent,
-				IPAddress: maskIP(sess.IPAddress),
+				IPAddress: helper.MaskIP(sess.IPAddress),
 				IsCurrent: false,
 			}
 			sessionInfos = append(sessionInfos, info)

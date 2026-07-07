@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"TaskFlow-Go/internal/helper"
+	"TaskFlow-Go/internal/validator"
+
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
@@ -47,14 +50,6 @@ func NewLabelService(
 		activityLogRepo: activityLogRepo,
 		userRepo:        userRepo,
 	}
-}
-
-func normalizeColor(color string) string {
-	color = strings.ToUpper(color)
-	if len(color) == 4 {
-		color = "#" + string(color[1]) + string(color[1]) + string(color[2]) + string(color[2]) + string(color[3]) + string(color[3])
-	}
-	return color
 }
 
 func (s *labelService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
@@ -179,7 +174,7 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrValidation
 	}
 
-	if !hexColorRegex.MatchString(req.Color) {
+	if !validator.ValidateHexColor(req.Color) {
 		return nil, apperror.ErrInvalidColor
 	}
 
@@ -207,7 +202,7 @@ func (s *labelService) CreateLabel(workspaceID string, userID string, projectID 
 		return nil, apperror.ErrLabelLimitReached
 	}
 
-	color := normalizeColor(req.Color)
+	color := helper.NormalizeColor(req.Color)
 	label := models.Label{
 		Name:      name,
 		Color:     color,
@@ -246,7 +241,7 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return nil, apperror.ErrValidation
 	}
-	if req.Color != nil && !hexColorRegex.MatchString(*req.Color) {
+	if req.Color != nil && !validator.ValidateHexColor(*req.Color) {
 		return nil, apperror.ErrInvalidColor
 	}
 
@@ -290,7 +285,7 @@ func (s *labelService) UpdateLabel(workspaceID string, userID string, projectID 
 		}
 	}
 	if req.Color != nil {
-		newColor := normalizeColor(*req.Color)
+		newColor := helper.NormalizeColor(*req.Color)
 		if newColor != label.Color {
 			changes = append(changes, map[string]interface{}{
 				"field": "color",

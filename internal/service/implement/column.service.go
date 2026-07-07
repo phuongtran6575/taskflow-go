@@ -7,14 +7,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/activitylog"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	"TaskFlow-Go/internal/models"
+	"TaskFlow-Go/internal/validator"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -86,17 +87,6 @@ func (s *columnService) getColumnOrFail(projectID, columnID string) (*models.Col
 	return col, nil
 }
 
-func (s *columnService) validateTitle(title string) error {
-	trimmed := strings.TrimSpace(title)
-	if trimmed == "" || utf8.RuneCountInString(trimmed) < 1 {
-		return apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "Column title must not be empty or whitespace-only")
-	}
-	if utf8.RuneCountInString(trimmed) > 50 {
-		return apperror.NewAppError(http.StatusBadRequest, "VALIDATION_ERROR", "Column title must be at most 50 characters")
-	}
-	return nil
-}
-
 func (s *columnService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
 	wsID := workspaceID
 	uID := userID
@@ -127,22 +117,6 @@ func (s *columnService) logActivity(workspaceID, projectID, userID, entityID str
 		Metadata:       metaStr,
 		EntitySnapshot: snapStr,
 	})
-}
-
-func columnsToInfo(cols []models.Column) []dto.ColumnInfo {
-	res := make([]dto.ColumnInfo, len(cols))
-	for i, c := range cols {
-		res[i] = dto.ColumnInfo{
-			ID:        c.ID,
-			Title:     c.Title,
-			Position:  c.Position,
-			IsDone:    c.IsDone,
-			TaskCount: 0,
-			CreatedAt: c.CreatedAt,
-			UpdatedAt: c.UpdatedAt,
-		}
-	}
-	return res
 }
 
 // validatePositionContext implements BR-COL-03
@@ -217,7 +191,7 @@ func (s *columnService) CreateColumn(workspaceID string, userID string, projectI
 	if project.IsArchived {
 		return nil, apperror.ErrProjectArchived
 	}
-	if err := s.validateTitle(req.Title); err != nil {
+	if err := validator.ValidateColumnTitle(req.Title); err != nil {
 		return nil, err
 	}
 
@@ -287,7 +261,7 @@ func (s *columnService) UpdateColumnTitle(workspaceID string, userID string, pro
 	if project.IsArchived {
 		return nil, apperror.ErrProjectArchived
 	}
-	if err := s.validateTitle(req.Title); err != nil {
+	if err := validator.ValidateColumnTitle(req.Title); err != nil {
 		return nil, err
 	}
 
@@ -389,7 +363,7 @@ func (s *columnService) UpdateColumnPosition(workspaceID string, userID string, 
 					}
 				}
 
-				allColsInfo := columnsToInfo(rebalancedCols)
+				allColsInfo := helper.ColumnsToInfo(rebalancedCols)
 
 				col.Position = newPos
 				col.UpdatedAt = time.Now()

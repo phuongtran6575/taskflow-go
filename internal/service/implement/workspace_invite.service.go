@@ -1,10 +1,8 @@
 package implement
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"gorm.io/gorm"
@@ -116,7 +114,7 @@ func (s *workspaceInviteService) CreateInvite(workspaceID string, userID string,
 		return nil, err
 	}
 
-	code, err := generateInviteCode()
+	code, err := helper.GenerateInviteCode()
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to generate invite code")
 	}
@@ -291,19 +289,5 @@ func (s *workspaceInviteService) RevokeInvite(workspaceID string, userID string,
 	}, nil
 }
 
-func generateInviteCode() (string, error) {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const prefix = "WS-"
-	const length = 6
 
-	code := make([]byte, length)
-	for i := range code {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
-		if err != nil {
-			return "", err
-		}
-		code[i] = charset[n.Int64()]
-	}
-	return prefix + string(code), nil
-}
 

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/dto"
+	"TaskFlow-Go/internal/helper"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
@@ -107,7 +108,7 @@ func (s *activityLogService) ListTaskTimeline(workspaceID string, userID string,
 		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list comments")
 	}
 
-	entries := mergeTimeline(activityResp.Data, commentResp.Data, direction)
+	entries := helper.MergeTimeline(activityResp.Data, commentResp.Data, direction)
 	hasMore := activityResp.HasMore || commentResp.HasMore
 	nextCursor := activityResp.NextCursor
 	if commentResp.NextCursor != nil {
@@ -126,70 +127,6 @@ func (s *activityLogService) ListTaskTimeline(workspaceID string, userID string,
 		HasMore:    hasMore,
 		NextCursor: nextCursor,
 	}, nil
-}
-
-func mergeTimeline(activities []dto.ActivityLogInfo, comments []dto.CommentInfo, direction string) []interface{} {
-	result := make([]interface{}, 0, len(activities)+len(comments))
-	aIdx, cIdx := 0, 0
-	asc := direction == "asc"
-
-	for aIdx < len(activities) && cIdx < len(comments) {
-		var before bool
-		if asc {
-			before = activities[aIdx].CreatedAt <= comments[cIdx].CreatedAt
-		} else {
-			before = activities[aIdx].CreatedAt >= comments[cIdx].CreatedAt
-		}
-		if before {
-			result = append(result, toActivityEntry(activities[aIdx]))
-			aIdx++
-		} else {
-			result = append(result, toCommentEntry(comments[cIdx]))
-			cIdx++
-		}
-	}
-	for aIdx < len(activities) {
-		result = append(result, toActivityEntry(activities[aIdx]))
-		aIdx++
-	}
-	for cIdx < len(comments) {
-		result = append(result, toCommentEntry(comments[cIdx]))
-		cIdx++
-	}
-	return result
-}
-
-func toActivityEntry(item dto.ActivityLogInfo) dto.TimelineActivityEntry {
-	return dto.TimelineActivityEntry{
-		EntryType:   "activity",
-		ID:          item.ID,
-		Action:      item.Action,
-		EntityType:  item.EntityType,
-		Description: item.Description,
-		Actor:       item.Actor,
-		Metadata:    item.Metadata,
-		CreatedAt:   item.CreatedAt,
-	}
-}
-
-func toCommentEntry(item dto.CommentInfo) dto.TimelineCommentEntry {
-	return dto.TimelineCommentEntry{
-		EntryType:   "comment",
-		ID:          item.ID,
-		Content:     item.Content,
-		ContentHTML: item.ContentHTML,
-		IsDeleted:   item.IsDeleted,
-		IsEdited:    item.IsEdited,
-		Author: &dto.ActivityLogActor{
-			UserID:    item.Author.UserID,
-			FullName:  item.Author.FullName,
-			Username:  item.Author.Username,
-			AvatarURL: item.Author.AvatarURL,
-		},
-		Mentions:  item.Mentions,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
-	}
 }
 
 func (s *activityLogService) ExportWorkspaceActivity(workspaceID string, userID string, dateFrom string, dateTo string, format string) ([]byte, string, error) {
@@ -230,7 +167,7 @@ func (s *activityLogService) ExportWorkspaceActivity(workspaceID string, userID 
 			item.EntityID,
 			item.Actor.FullName,
 			actorEmail,
-			safeProjectName(item.Project),
+			helper.SafeProjectName(item.Project),
 			item.Description,
 			item.CreatedAt,
 		})
@@ -238,17 +175,8 @@ func (s *activityLogService) ExportWorkspaceActivity(workspaceID string, userID 
 	writer.Flush()
 
 	ws, _ := s.workspaceRepo.GetByID(workspaceID)
-	filename := fmt.Sprintf("activity_%s_%s.csv", safeStr2(ws, "workspace"), dateFrom)
+	filename := fmt.Sprintf("activity_%s_%s.csv", helper.SafeStr2(ws, "workspace"), dateFrom)
 	return []byte(buf.String()), filename, nil
 }
 
-func safeProjectName(p *dto.ActivityLogProjectRef) string {
-	if p == nil {
-		return ""
-	}
-	return p.Name
-}
 
-func safeStr2(ws interface{}, fallback string) string {
-	return fallback
-}

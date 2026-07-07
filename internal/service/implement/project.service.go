@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"gorm.io/gorm"
 
@@ -21,12 +20,10 @@ import (
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
 	"TaskFlow-Go/internal/shared/apperror"
+	"TaskFlow-Go/internal/validator"
 )
 
-var hexColorRegex = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
 var projectKeyRegex = regexp.MustCompile(`^[A-Z0-9]{2,10}$`)
-var validImageExt = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|webp|gif)$`)
-var wordSplitRegex = regexp.MustCompile(`[\s\-_]+`)
 
 type projectService struct {
 	tm              *database.TransactionManager
@@ -81,62 +78,11 @@ func (s *projectService) getProjectOrFail(workspaceID, projectID string) (*model
 	return project, nil
 }
 
-// generateKey tự động tạo key từ tên project theo BR-PROJ-01
-func (s *projectService) generateKey(name string) string {
-	words := wordSplitRegex.Split(strings.TrimSpace(name), -1)
-	var filtered []string
-	for _, w := range words {
-		if w != "" {
-			filtered = append(filtered, w)
-		}
-	}
-
-	var key string
-	if len(filtered) >= 2 {
-		maxWords := 5
-		if len(filtered) < maxWords {
-			maxWords = len(filtered)
-		}
-		for i := 0; i < maxWords; i++ {
-			runes := []rune(strings.TrimSpace(filtered[i]))
-			if len(runes) > 0 {
-				key += string(unicode.ToUpper(runes[0]))
-			}
-		}
-	} else if len(filtered) == 1 {
-		clean := strings.Map(func(r rune) rune {
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				return r
-			}
-			return -1
-		}, filtered[0])
-		if len(clean) > 5 {
-			clean = clean[:5]
-		}
-		key = strings.ToUpper(clean)
-	}
-
-	key = strings.Map(func(r rune) rune {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		return -1
-	}, strings.ToUpper(key))
-
-	if len(key) < 2 {
-		key = "PRJ"
-	}
-	if len(key) > 10 {
-		key = key[:10]
-	}
-	return key
-}
-
 // resolveKey xử lý key: auto-generate nếu không nhập, validate, handle duplicate
 func (s *projectService) resolveKey(workspaceID string, inputKey *string, projectName string) (string, error) {
 	var key string
 	if inputKey == nil || *inputKey == "" {
-		key = s.generateKey(projectName)
+		key = helper.GenerateProjectKey(projectName)
 	} else {
 		key = strings.ToUpper(*inputKey)
 		if !projectKeyRegex.MatchString(key) {
@@ -166,16 +112,6 @@ func (s *projectService) resolveKey(workspaceID string, inputKey *string, projec
 	}
 
 	return "", apperror.NewAppError(http.StatusConflict, "KEY_GENERATION_FAILED", "Cannot generate unique key after 99 attempts. Please provide a custom key.")
-}
-
-func (s *projectService) isValidBackground(bg string) bool {
-	if hexColorRegex.MatchString(bg) {
-		return true
-	}
-	if !strings.HasPrefix(bg, "https://") {
-		return false
-	}
-	return validImageExt.MatchString(bg)
 }
 
 func (s *projectService) logActivity(workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
@@ -267,7 +203,7 @@ func (s *projectService) CreateProject(workspaceID string, userID string, req *d
 		return nil, err
 	}
 
-	if req.Background != nil && *req.Background != "" && !s.isValidBackground(*req.Background) {
+	if req.Background != nil && *req.Background != "" && !validator.IsValidProjectBackground(*req.Background) {
 		return nil, apperror.ErrInvalidBackground
 	}
 
@@ -421,7 +357,7 @@ func (s *projectService) UpdateProject(workspaceID string, userID string, projec
 		project.Name = *req.Name
 	}
 	if req.Background != nil {
-		if *req.Background != "" && !s.isValidBackground(*req.Background) {
+		if *req.Background != "" && !validator.IsValidProjectBackground(*req.Background) {
 			return nil, apperror.ErrInvalidBackground
 		}
 		if project.Background != *req.Background {
