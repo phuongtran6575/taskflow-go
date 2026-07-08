@@ -3,11 +3,14 @@ package _interface
 import (
 	"time"
 
+	"gorm.io/gorm"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 )
 
 type AttachmentRepository interface {
+	WithTx(tx *gorm.DB) AttachmentRepository
 	Create(attachment *models.Attachment) error
 	GetByID(id string) (*models.Attachment, error)
 	Delete(id string) error

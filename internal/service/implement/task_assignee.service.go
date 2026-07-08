@@ -12,6 +12,7 @@ import (
 	"TaskFlow-Go/internal/helper"
 
 	"TaskFlow-Go/internal/activitylog"
+	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 	"TaskFlow-Go/internal/notif"
@@ -30,6 +31,7 @@ type taskAssigneeService struct {
 	activityLogRepo   repoInterface.ActivityLogRepository
 	userRepo          repoInterface.UserRepository
 	dispatcher        *notif.Dispatcher
+	tm                *database.TransactionManager
 }
 
 func NewTaskAssigneeService(
@@ -42,6 +44,7 @@ func NewTaskAssigneeService(
 	activityLogRepo repoInterface.ActivityLogRepository,
 	userRepo repoInterface.UserRepository,
 	dispatcher *notif.Dispatcher,
+	tm *database.TransactionManager,
 ) _interface.TaskAssigneeService {
 	return &taskAssigneeService{
 		taskRepo:          taskRepo,
@@ -53,6 +56,7 @@ func NewTaskAssigneeService(
 		activityLogRepo:   activityLogRepo,
 		userRepo:          userRepo,
 		dispatcher:        dispatcher,
+		tm:                tm,
 	}
 }
 
@@ -130,6 +134,38 @@ func (s *taskAssigneeService) logActivity(workspaceID, projectID, userID, entity
 		descPtr = &description
 	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeTASK,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
+func (s *taskAssigneeService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
 		WorkspaceID:    &wsID,
 		ProjectID:      &projectID,
 		UserID:         &uID,
@@ -273,15 +309,35 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 			skippedIDs = append(skippedIDs, uid)
 			continue
 		}
-		assignee := models.TaskAssignee{
-			TaskID:       taskID,
-			UserID:       uid,
-			AssignedByID: &userID,
-		}
-		if err := s.assigneeRepo.Create(&assignee); err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign member")
-		}
 		addedIDs = append(addedIDs, uid)
+	}
+
+	// Prepare activity log data (outside transaction)
+	actorName := s.getUserName(userID)
+	taskRef := s.getTaskRef(task, project)
+	addedUsers := make([]map[string]string, 0, len(addedIDs))
+	for _, id := range addedIDs {
+		addedUsers = append(addedUsers, map[string]string{"user_id": id, "full_name": s.getUserName(id)})
+	}
+	logMeta := activitylog.AssigneesAdded(addedUsers)
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		for _, uid := range addedIDs {
+			assignee := models.TaskAssignee{
+				TaskID:       taskID,
+				UserID:       uid,
+				AssignedByID: &userID,
+			}
+			if err := s.assigneeRepo.WithTx(tx).Create(&assignee); err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to assign member")
+			}
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	all, err := s.assigneeRepo.ListByTaskID(taskID)
@@ -309,8 +365,6 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 	}
 
 	// BR-ASSIGN-05: Gửi notification riêng cho từng assignee mới (trừ self)
-	taskRef := s.getTaskRef(task, project)
-	actorName := s.getUserName(userID)
 	for _, aid := range addedIDs {
 		s.dispatcher.DispatchASSIGNED(&notif.ASSIGNEDInput{
 			ActorID:     userID,
@@ -325,18 +379,6 @@ func (s *taskAssigneeService) AssignMembersToTask(workspaceID string, userID str
 			TaskID:      taskID,
 		})
 	}
-
-	// BR-ASSIGN-06: Activity log
-	addedUsers := make([]map[string]string, 0, len(addedIDs))
-	for _, id := range addedIDs {
-		addedUsers = append(addedUsers, map[string]string{"user_id": id, "full_name": infoMap[id].FullName})
-	}
-	actorName = s.getUserName(userID)
-	taskRef = s.getTaskRef(task, project)
-	meta := activitylog.AssigneesAdded(addedUsers)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
 
 	return &dto.AssignMembersResponse{
 		TaskID:                 taskID,
@@ -383,26 +425,34 @@ func (s *taskAssigneeService) UnassignMembersFromTask(workspaceID string, userID
 			skipped = append(skipped, dto.SkippedUser{UserID: uid, Reason: "NOT_AN_ASSIGNEE"})
 			continue
 		}
-		if err := s.assigneeRepo.Delete(taskID, uid); err != nil {
-			return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unassign member")
-		}
 		info := infoMap[uid]
 		removed = append(removed, dto.UserRef{UserID: uid, FullName: info.FullName})
 	}
 
-	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
-
-	// BR-ASSIGN-06: Activity log
+	// Prepare activity log data (outside transaction)
+	actorName := s.getUserName(userID)
+	taskRef := s.getTaskRef(task, project)
 	removedUsers := make([]map[string]string, 0, len(removed))
 	for _, r := range removed {
 		removedUsers = append(removedUsers, map[string]string{"user_id": r.UserID, "full_name": r.FullName})
 	}
-	actorName := s.getUserName(userID)
-	taskRef := s.getTaskRef(task, project)
-	meta := activitylog.AssigneesRemoved(removedUsers)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
+	logMeta := activitylog.AssigneesRemoved(removedUsers)
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		for _, r := range removed {
+			if err := s.assigneeRepo.WithTx(tx).Delete(taskID, r.UserID); err != nil {
+				return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unassign member")
+			}
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
 	return &dto.UnassignMembersResponse{
 		TaskID:              taskID,
@@ -452,26 +502,32 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 		}
 	}
 
-	assignee := models.TaskAssignee{
-		TaskID:       taskID,
-		UserID:       userID,
-		AssignedByID: &userID,
-	}
-	if err := s.assigneeRepo.Create(&assignee); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to self-assign")
-	}
-
-	// BR-ASSIGN-06: Activity log — self_assigned
 	actorName := s.getUserName(userID)
 	taskRef := s.getTaskRef(task, project)
-	meta := map[string]interface{}{
+	logMeta := map[string]interface{}{
 		"event":     "self_assigned",
 		"user_id":   userID,
 		"full_name": actorName,
 	}
-	desc := fmt.Sprintf("%s đã tự gán task %s", actorName, taskRef)
-	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
+	logDesc := fmt.Sprintf("%s đã tự gán task %s", actorName, taskRef)
+	logSnap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+
+	var assignedAt string
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		assignee := models.TaskAssignee{
+			TaskID:       taskID,
+			UserID:       userID,
+			AssignedByID: &userID,
+		}
+		if err := s.assigneeRepo.WithTx(tx).Create(&assignee); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to self-assign")
+		}
+		assignedAt = assignee.AssignedAt.Format(time.RFC3339)
+		s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	all, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 
@@ -479,7 +535,7 @@ func (s *taskAssigneeService) SelfAssignToTask(workspaceID string, userID string
 		TaskID:              taskID,
 		TaskRef:             s.getTaskRef(task, project),
 		Message:             "You have been assigned to this task.",
-		AssignedAt:          assignee.AssignedAt.Format(time.RFC3339),
+		AssignedAt:          assignedAt,
 		TotalAssigneesAfter: len(all),
 	}, nil
 }
@@ -498,19 +554,25 @@ func (s *taskAssigneeService) SelfUnassignFromTask(workspaceID string, userID st
 		return nil, err
 	}
 
-	_ = s.assigneeRepo.Delete(taskID, userID)
-
-	// BR-ASSIGN-06: Activity log — self_unassigned
 	actorName := s.getUserName(userID)
 	taskRef := s.getTaskRef(task, project)
-	meta := map[string]interface{}{
+	logMeta := map[string]interface{}{
 		"event":     "self_unassigned",
 		"user_id":   userID,
 		"full_name": actorName,
 	}
-	desc := fmt.Sprintf("%s đã tự bỏ gán task %s", actorName, taskRef)
-	snap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, meta, desc, snap)
+	logDesc := fmt.Sprintf("%s đã tự bỏ gán task %s", actorName, taskRef)
+	logSnap := activitylog.BuildTaskSnapshot(taskRef, task.Title, project.Key)
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.assigneeRepo.WithTx(tx).Delete(taskID, userID); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to unassign")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	remaining, _ := s.assigneeRepo.ListTaskAssigneesByTaskID(taskID)
 

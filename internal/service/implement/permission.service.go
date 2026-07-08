@@ -24,7 +24,7 @@ func NewPermissionService(
 }
 
 func (s *permissionService) ListFlatPermissions(userID string) (*dto.PermissionFlatResponse, error) {
-	permissions, err := 	s.permRepo.List()
+	permissions, err := s.permRepo.List()
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to list permissions")
 	}

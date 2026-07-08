@@ -17,6 +17,10 @@ func NewProjectMemberRepository(db *gorm.DB) _interface.ProjectMemberRepository 
 	return &projectMemberRepository{db: db}
 }
 
+func (r *projectMemberRepository) WithTx(tx *gorm.DB) _interface.ProjectMemberRepository {
+	return &projectMemberRepository{db: tx}
+}
+
 func (r *projectMemberRepository) Update(member *models.ProjectMember) error {
 	err := r.db.Model(&models.ProjectMember{}).
 		Where("project_id = ? AND user_id = ?", member.ProjectID, member.UserID).

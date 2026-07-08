@@ -1,11 +1,14 @@
 package _interface
 
 import (
+	"gorm.io/gorm"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 )
 
 type TaskAssigneeRepository interface {
+	WithTx(tx *gorm.DB) TaskAssigneeRepository
 	Create(assignee *models.TaskAssignee) error
 	GetByID(taskID, userID string) (*models.TaskAssignee, error)
 	ListTaskAssigneesByTaskID(taskID string) ([]models.TaskAssignee, error)

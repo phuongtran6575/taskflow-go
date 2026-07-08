@@ -19,6 +19,10 @@ func NewNotificationRepository(db *gorm.DB) _interface.NotificationRepository {
 	return &notificationRepository{db: db}
 }
 
+func (r *notificationRepository) WithTx(tx *gorm.DB) _interface.NotificationRepository {
+	return &notificationRepository{db: tx}
+}
+
 func (r *notificationRepository) Create(notification *models.Notification, recipients []string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(notification).Error; err != nil {

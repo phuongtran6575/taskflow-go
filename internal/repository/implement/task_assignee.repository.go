@@ -18,6 +18,10 @@ func NewTaskAssigneeRepository(db *gorm.DB) _interface.TaskAssigneeRepository {
 	return &taskAssigneeRepository{db: db}
 }
 
+func (r *taskAssigneeRepository) WithTx(tx *gorm.DB) _interface.TaskAssigneeRepository {
+	return &taskAssigneeRepository{db: tx}
+}
+
 func (r *taskAssigneeRepository) ListByTaskIDs(taskIDs []string) (map[string][]dto.AssigneeInfo, error) {
 	if len(taskIDs) == 0 {
 		return map[string][]dto.AssigneeInfo{}, nil

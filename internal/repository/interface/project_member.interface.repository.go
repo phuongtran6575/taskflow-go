@@ -1,11 +1,14 @@
 package _interface
 
 import (
+	"gorm.io/gorm"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 )
 
 type ProjectMemberRepository interface {
+	WithTx(tx *gorm.DB) ProjectMemberRepository
 	GetByID(projectID, userID string) (*models.ProjectMember, error)
 	GetByIDWithRelationRole(projectID, userID string) (*models.ProjectMember, error)
 	ListByProjectID(projectID string) ([]models.ProjectMember, error)

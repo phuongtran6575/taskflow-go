@@ -18,6 +18,10 @@ func NewAttachmentRepository(db *gorm.DB) _interface.AttachmentRepository {
 	return &attachmentRepository{db: db}
 }
 
+func (r *attachmentRepository) WithTx(tx *gorm.DB) _interface.AttachmentRepository {
+	return &attachmentRepository{db: tx}
+}
+
 func (r *attachmentRepository) Create(attachment *models.Attachment) error {
 	return r.db.Create(attachment).Error
 }

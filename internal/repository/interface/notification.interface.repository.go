@@ -3,11 +3,14 @@ package _interface
 import (
 	"time"
 
+	"gorm.io/gorm"
+
 	"TaskFlow-Go/internal/dto"
 	"TaskFlow-Go/internal/models"
 )
 
 type NotificationRepository interface {
+	WithTx(tx *gorm.DB) NotificationRepository
 	Create(notification *models.Notification, recipients []string) error
 	GetByID(id string) (*models.Notification, error)
 	GetRecipient(notificationID, recipientID string) (*models.NotificationRecipient, error)

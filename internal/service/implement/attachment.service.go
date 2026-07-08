@@ -437,22 +437,27 @@ func (s *attachmentService) DeleteAttachment(workspaceID string, userID string, 
 		return nil, err
 	}
 
-	scheduledAt := time.Now().Add(30 * 24 * time.Hour)
-	if err := s.attachmentRepo.SoftDelete(attachmentID, scheduledAt); err != nil {
-		return nil, apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete attachment")
-	}
-
 	isOwn := att.UploaderID != nil && *att.UploaderID == userID
 	actorName := s.getUserName(userID)
-	meta := map[string]interface{}{
+	logMeta := map[string]interface{}{
 		"event":       "attachment_deleted",
 		"file_name":   att.FileName,
 		"size_bytes":  att.SizeBytes,
 		"deleted_own": isOwn,
 	}
-	desc := activitylog.GenerateDescription(actorName, meta)
-	taskSnap := activitylog.BuildTaskSnapshot("", "", project.Key)
-	s.logActivity(workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, meta, desc, taskSnap)
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildTaskSnapshot("", "", project.Key)
+
+	scheduledAt := time.Now().Add(30 * 24 * time.Hour)
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.attachmentRepo.WithTx(tx).SoftDelete(attachmentID, scheduledAt); err != nil {
+			return apperror.NewAppError(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete attachment")
+		}
+		s.logActivityInTx(tx, workspaceID, projectID, userID, taskID, models.ActivityActionDELETE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return &dto.DeleteAttachmentResponse{
 		Message:                   fmt.Sprintf("Attachment '%s' has been deleted.", att.FileName),

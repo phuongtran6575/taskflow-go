@@ -116,9 +116,7 @@ func (s *activityLogService) ListTaskTimeline(workspaceID string, userID string,
 	}
 
 	interfaceEntries := make([]interface{}, len(entries))
-	for i, e := range entries {
-		interfaceEntries[i] = e
-	}
+	copy(interfaceEntries, entries)
 
 	return &dto.TaskTimelineResponse{
 		TaskID:     taskID,
@@ -178,5 +176,3 @@ func (s *activityLogService) ExportWorkspaceActivity(workspaceID string, userID 
 	filename := fmt.Sprintf("activity_%s_%s.csv", helper.SafeStr2(ws, "workspace"), dateFrom)
 	return []byte(buf.String()), filename, nil
 }
-
-

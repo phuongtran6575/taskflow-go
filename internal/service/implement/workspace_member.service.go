@@ -19,13 +19,13 @@ import (
 )
 
 type workspaceMemberService struct {
-	memberRepo         repoInterface.WorkspaceMemberRepository
-	workspaceRepo      repoInterface.WorkspaceRepository
-	userRepo           repoInterface.UserRepository
-	projectMemberRepo  repoInterface.ProjectMemberRepository
-	tm                 *database.TransactionManager
-	notifRepo          repoInterface.NotificationRepository
-	activityLogRepo    repoInterface.ActivityLogRepository
+	memberRepo        repoInterface.WorkspaceMemberRepository
+	workspaceRepo     repoInterface.WorkspaceRepository
+	userRepo          repoInterface.UserRepository
+	projectMemberRepo repoInterface.ProjectMemberRepository
+	tm                *database.TransactionManager
+	notifRepo         repoInterface.NotificationRepository
+	activityLogRepo   repoInterface.ActivityLogRepository
 }
 
 func NewWorkspaceMemberService(
@@ -48,6 +48,7 @@ func NewWorkspaceMemberService(
 	}
 }
 
+// da review
 func (s *workspaceMemberService) ListMembers(workspaceID string, userID string, page int, limit int, search string, role string) ([]dto.MemberInfo, *dto.Pagination, error) {
 	members, pagination, err := s.memberRepo.ListWithPagination(workspaceID, search, role, page, limit)
 	if err != nil {
@@ -56,21 +57,19 @@ func (s *workspaceMemberService) ListMembers(workspaceID string, userID string, 
 	return members, pagination, nil
 }
 
+// da review
 func (s *workspaceMemberService) GetMemberDetails(workspaceID string, targetUserID string) (*dto.MemberDetailResponse, error) {
-	if _, err := s.memberRepo.GetByID(workspaceID, targetUserID); err != nil {
+	member, err := s.memberRepo.GetByIDWithDetails(workspaceID, targetUserID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.ErrMemberNotFound
 		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get member")
-	}
-
-	member, err := s.memberRepo.GetByIDWithDetails(workspaceID, targetUserID)
-	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get member details")
 	}
 	return member, nil
 }
 
+// chua review xong
 func (s *workspaceMemberService) UpdateMemberRole(workspaceID string, userID string, targetUserID string, req *dto.UpdateMemberRoleRequest) (*dto.UpdateRoleResponse, error) {
 	authMember, err := s.memberRepo.GetByID(workspaceID, userID)
 	if err != nil {
@@ -113,23 +112,32 @@ func (s *workspaceMemberService) UpdateMemberRole(workspaceID string, userID str
 		}
 	}
 
-	if err := s.memberRepo.UpdateRole(workspaceID, targetUserID, newRole); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update role")
+	actorName := s.getUserName(userID)
+	targetFullName := s.getUserName(targetUserID)
+	logMeta := activitylog.WorkspaceRoleChanged(targetUserID, targetFullName, string(targetMember.Role), string(newRole))
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+
+	workspace, err := s.workspaceRepo.GetByID(workspaceID)
+	var logSnap map[string]interface{}
+	if err == nil {
+		logSnap = activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	}
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.memberRepo.WithTx(tx).UpdateRole(workspaceID, targetUserID, newRole); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update role")
+		}
+		if workspace != nil {
+			s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	targetInfo, err := s.memberRepo.GetMemberWithInfor(workspaceID, targetUserID)
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get target info")
-	}
-
-	workspace, err := s.workspaceRepo.GetByID(workspaceID)
-	if err == nil {
-		actorName := s.getUserName(userID)
-		targetFullName := s.getUserName(targetUserID)
-		meta := activitylog.WorkspaceRoleChanged(targetUserID, targetFullName, string(targetMember.Role), string(newRole))
-		desc := activitylog.GenerateDescription(actorName, meta)
-		snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-		s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
 	}
 
 	return &dto.UpdateRoleResponse{
@@ -142,6 +150,7 @@ func (s *workspaceMemberService) UpdateMemberRole(workspaceID string, userID str
 	}, nil
 }
 
+// chua review xong
 func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID string, req *dto.TransferOwnershipRequest) (*dto.TransferOwnershipResponse, error) {
 	if req.NewOwnerID == userID {
 		return nil, apperror.ErrCannotTransferToSelf
@@ -224,8 +233,8 @@ func (s *workspaceMemberService) TransferOwnership(workspaceID string, userID st
 		return nil, err
 	}
 
-	notifTitle := fmt.Sprintf("Bạn đã được chuyển quyền OWNER")
-	notifContent := fmt.Sprintf("Bạn đã được chuyển quyền OWNER của workspace %s.", workspace.Name)
+	notifTitle := "Bạn đã được chuyển quyền OWNER"
+	notifContent := fmt.Sprintf("Bạn đã được chuyển quyền OWNER của workspace %s bởi %s.", workspace.Name, actorName)
 	notification := &models.Notification{
 		ActorID: &userID,
 		Type:    models.NotificationTypeANNOUNCEMENT,
@@ -288,32 +297,35 @@ func (s *workspaceMemberService) KickMember(workspaceID string, userID string, t
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get workspace")
 	}
 
-	notifTitle := fmt.Sprintf("Bạn đã bị xóa khỏi workspace %s", workspace.Name)
-	notifContent := fmt.Sprintf("Bạn không còn là thành viên của %s.", workspace.Name)
-	notification := &models.Notification{
-		ActorID: &userID,
-		Type:    models.NotificationTypeANNOUNCEMENT,
-		Title:   notifTitle,
-		Content: &notifContent,
-	}
-	if err := s.notifRepo.Create(notification, []string{targetUserID}); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
-	}
-
-	if err := s.memberRepo.Delete(workspaceID, targetUserID); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to kick member")
-	}
-
-	if err := s.projectMemberRepo.DeleteByWorkspace(workspaceID, targetUserID); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to remove member from projects")
-	}
-
 	actorName := s.getUserName(userID)
 	targetName := s.getUserName(targetUserID)
-	meta := activitylog.WorkspaceMemberRemoved(targetUserID, targetName, string(authMember.Role))
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, meta, desc, snap)
+	logMeta := activitylog.WorkspaceMemberRemoved(targetUserID, targetName, string(authMember.Role))
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		notifTitle := fmt.Sprintf("Bạn đã bị xóa khỏi workspace %s", workspace.Name)
+		notifContent := fmt.Sprintf("Bạn không còn là thành viên của %s.", workspace.Name)
+		notification := &models.Notification{
+			ActorID: &userID,
+			Type:    models.NotificationTypeANNOUNCEMENT,
+			Title:   notifTitle,
+			Content: &notifContent,
+		}
+		if err := s.notifRepo.WithTx(tx).Create(notification, []string{targetUserID}); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to send notification")
+		}
+		if err := s.memberRepo.WithTx(tx).Delete(workspaceID, targetUserID); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to kick member")
+		}
+		if err := s.projectMemberRepo.WithTx(tx).DeleteByWorkspace(workspaceID, targetUserID); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to remove member from projects")
+		}
+		s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return &dto.KickMemberResponse{
 		Message:             "Member has been removed from the workspace.",
@@ -322,6 +334,7 @@ func (s *workspaceMemberService) KickMember(workspaceID string, userID string, t
 	}, nil
 }
 
+// Da review
 func (s *workspaceMemberService) LeaveWorkspace(workspaceID string, userID string, req *dto.LeaveWorkspaceRequest) (*dto.LeaveWorkspaceResponse, error) {
 	if !req.Confirmation {
 		return nil, apperror.ErrConfirmationRequired

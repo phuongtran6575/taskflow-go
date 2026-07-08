@@ -93,20 +93,52 @@ func (s *columnService) logActivity(workspaceID, projectID, userID, entityID str
 	var metaStr *string
 	if metadata != nil {
 		b, _ := json.Marshal(metadata)
-		s := string(b)
-		metaStr = &s
+		str := string(b)
+		metaStr = &str
 	}
 	var snapStr *string
 	if entitySnapshot != nil {
 		b, _ := json.Marshal(entitySnapshot)
-		s := string(b)
-		snapStr = &s
+		str := string(b)
+		snapStr = &str
 	}
 	var descPtr *string
 	if description != "" {
 		descPtr = &description
 	}
 	_ = s.activityLogRepo.Create(&models.ActivityLog{
+		WorkspaceID:    &wsID,
+		ProjectID:      &projectID,
+		UserID:         &uID,
+		Action:         action,
+		EntityType:     models.EntityTypeCOLUMN,
+		EntityID:       entityID,
+		Description:    descPtr,
+		Metadata:       metaStr,
+		EntitySnapshot: snapStr,
+	})
+}
+
+func (s *columnService) logActivityInTx(tx *gorm.DB, workspaceID, projectID, userID, entityID string, action models.ActivityAction, metadata map[string]interface{}, description string, entitySnapshot map[string]interface{}) {
+	wsID := workspaceID
+	uID := userID
+	var metaStr *string
+	if metadata != nil {
+		b, _ := json.Marshal(metadata)
+		str := string(b)
+		metaStr = &str
+	}
+	var snapStr *string
+	if entitySnapshot != nil {
+		b, _ := json.Marshal(entitySnapshot)
+		str := string(b)
+		snapStr = &str
+	}
+	var descPtr *string
+	if description != "" {
+		descPtr = &description
+	}
+	_ = tx.Create(&models.ActivityLog{
 		WorkspaceID:    &wsID,
 		ProjectID:      &projectID,
 		UserID:         &uID,
@@ -244,7 +276,7 @@ func (s *columnService) CreateColumn(workspaceID string, userID string, projectI
 		meta := activitylog.ColumnCreated(col.Title, int(col.Position))
 		desc := activitylog.GenerateDescription(actorName, meta)
 		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionCREATE, meta, desc, snap)
+		s.logActivityInTx(tx, workspaceID, projectID, userID, col.ID, models.ActivityActionCREATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -298,7 +330,7 @@ func (s *columnService) UpdateColumnTitle(workspaceID string, userID string, pro
 		meta := activitylog.ColumnUpdated(oldTitle, col.Title)
 		desc := activitylog.GenerateDescription(actorName, meta)
 		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, meta, desc, snap)
+		s.logActivityInTx(tx, workspaceID, projectID, userID, col.ID, models.ActivityActionUPDATE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {
@@ -499,7 +531,7 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 				meta := activitylog.ColumnDeletedMoveTasks(col.Title, *req.TargetColumnID, targetCol.Title, movedInt)
 				desc := activitylog.GenerateDescription(actorName, meta)
 				snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
-				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
+				s.logActivityInTx(tx, workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 				return nil
 
 			case "delete":
@@ -528,7 +560,7 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 				meta := activitylog.ColumnDeletedDeleteTasks(col.Title, tasksDeleted)
 				desc := activitylog.GenerateDescription(actorName, meta)
 				snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
-				s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
+				s.logActivityInTx(tx, workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 				return nil
 
 			default:
@@ -551,7 +583,7 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 		meta := activitylog.ColumnDeleted(col.Title)
 		desc := activitylog.GenerateDescription(actorName, meta)
 		snap := activitylog.BuildColumnSnapshot(col.Title, project.Key)
-		s.logActivity(workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
+		s.logActivityInTx(tx, workspaceID, projectID, userID, col.ID, models.ActivityActionDELETE, meta, desc, snap)
 		return nil
 	})
 	if err != nil {

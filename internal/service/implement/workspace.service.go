@@ -53,6 +53,7 @@ func NewWorkspaceService(
 	}
 }
 
+// da review
 func (s *workspaceService) GetWorkspacesByUserId(userID string) (*dto.WorkspaceListResponse, error) {
 	workspaces, total, err := s.workspaceRepo.ListByUserIDWithSummary(userID)
 	if err != nil {
@@ -223,16 +224,27 @@ func (s *workspaceService) UpdateWorkspace(workspaceID string, userID string, re
 	}
 
 	workspace.UpdatedAt = time.Now()
-	if err := s.workspaceRepo.Update(workspace); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update workspace")
-	}
 
+	var logMeta map[string]interface{}
+	var logDesc string
+	var logSnap map[string]interface{}
 	if len(changes) > 0 {
 		actorName := s.getUserName(userID)
-		meta := activitylog.WorkspaceUpdated(changes)
-		desc := activitylog.GenerateDescription(actorName, meta)
-		snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-		s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
+		logMeta = activitylog.WorkspaceUpdated(changes)
+		logDesc = activitylog.GenerateDescription(actorName, logMeta)
+		logSnap = activitylog.BuildWorkspaceSnapshot(workspace.Name)
+	}
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.workspaceRepo.WithTx(tx).Update(workspace); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to update workspace")
+		}
+		if len(changes) > 0 {
+			s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &dto.UpdateWorkspaceResponse{
@@ -287,15 +299,21 @@ func (s *workspaceService) UpgradePlan(workspaceID string, userID string, req *d
 	prevPlan := workspace.Plan
 	workspace.Plan = newPlan
 	workspace.UpdatedAt = time.Now()
-	if err := s.workspaceRepo.Update(workspace); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to upgrade plan")
-	}
 
 	actorName := s.getUserName(userID)
-	meta := activitylog.PlanUpgraded(string(prevPlan), string(newPlan))
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, meta, desc, snap)
+	logMeta := activitylog.PlanUpgraded(string(prevPlan), string(newPlan))
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
+
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.workspaceRepo.WithTx(tx).Update(workspace); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to upgrade plan")
+		}
+		s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionUPDATE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return &dto.PlanUpgradeResponse{
 		ID:           workspace.ID,
@@ -330,13 +348,18 @@ func (s *workspaceService) DeleteWorkspace(workspaceID string, userID string, re
 	}
 
 	actorName := s.getUserName(userID)
-	meta := activitylog.WorkspaceDeleted(workspace.Name)
-	desc := activitylog.GenerateDescription(actorName, meta)
-	snap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
-	s.logActivity(workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, meta, desc, snap)
+	logMeta := activitylog.WorkspaceDeleted(workspace.Name)
+	logDesc := activitylog.GenerateDescription(actorName, logMeta)
+	logSnap := activitylog.BuildWorkspaceSnapshot(workspace.Name)
 
-	if err := s.workspaceRepo.Delete(workspaceID); err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to delete workspace")
+	if err := s.tm.Execute(func(tx *gorm.DB) error {
+		if err := s.workspaceRepo.WithTx(tx).Delete(workspaceID); err != nil {
+			return apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to delete workspace")
+		}
+		s.logActivityInTx(tx, workspaceID, "", userID, workspaceID, models.ActivityActionDELETE, logMeta, logDesc, logSnap)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	s.dispatcher.CascadeSoftDeleteWorkspace(workspaceID)

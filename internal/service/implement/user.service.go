@@ -17,10 +17,10 @@ import (
 )
 
 type userService struct {
-	userRepo             repoInterface.UserRepository
-	sessionRepo          repoInterface.SessionRepository
-	workspaceMemberRepo  repoInterface.WorkspaceMemberRepository
-	avatarStorage        _interface.AvatarStorageService
+	userRepo            repoInterface.UserRepository
+	sessionRepo         repoInterface.SessionRepository
+	workspaceMemberRepo repoInterface.WorkspaceMemberRepository
+	avatarStorage       _interface.AvatarStorageService
 }
 
 func NewUserService(
@@ -282,7 +282,7 @@ func (s *userService) DeleteAccount(userID string, req *dto.DeleteAccountRequest
 	anonymizedUsername := "deleted_" + randomSuffix
 	now := time.Now()
 
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"full_name":  "Deleted User",
 		"username":   anonymizedUsername,
 		"avatar_url": nil,

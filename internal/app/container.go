@@ -155,7 +155,7 @@ func NewContainer(db *gorm.DB) *Container {
 	c.ProjectMemberService = serviceImpl.NewProjectMemberService(tm, c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
 	c.ColumnService = serviceImpl.NewColumnService(tm, c.ColumnRepo, c.ProjectRepo, c.ActivityLogRepo, c.UserRepo)
 	c.TaskService = serviceImpl.NewTaskService(tm, c.TaskRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.LabelRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
-	c.TaskAssigneeService = serviceImpl.NewTaskAssigneeService(c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.WorkspaceRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
+	c.TaskAssigneeService = serviceImpl.NewTaskAssigneeService(c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.WorkspaceRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher, tm)
 	c.TaskBoardService = serviceImpl.NewTaskBoardService(tm, c.TaskRepo, c.ColumnRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
 	c.LabelService = serviceImpl.NewLabelService(tm, c.LabelRepo, c.TaskLabelRepo, c.ProjectRepo, c.TaskRepo, c.ActivityLogRepo, c.UserRepo)
 	c.AttachmentService = serviceImpl.NewAttachmentService(tm, c.AttachmentRepo, c.TaskRepo, c.ProjectRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.ProjectMemberRepo, c.UserRepo)
