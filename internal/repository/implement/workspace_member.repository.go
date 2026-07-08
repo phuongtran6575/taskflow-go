@@ -44,7 +44,10 @@ func (r *workspaceMemberRepository) GetByID(workspaceID, userID string) (*models
 
 func (r *workspaceMemberRepository) ListByUserID(userID string) ([]models.WorkspaceMember, error) {
 	var members []models.WorkspaceMember
-	err := r.db.Where("user_id = ?", userID).Find(&members).Error
+	err := r.db.
+		Joins("JOIN workspaces ON workspaces.id = workspace_members.workspace_id AND workspaces.deleted_at IS NULL").
+		Where("workspace_members.user_id = ?", userID).
+		Find(&members).Error
 	return members, err
 }
 

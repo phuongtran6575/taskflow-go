@@ -1,6 +1,7 @@
 package app
 
 import (
+	"TaskFlow-Go/internal/cache"
 	"TaskFlow-Go/internal/database"
 	"TaskFlow-Go/internal/handler"
 	"TaskFlow-Go/internal/job"
@@ -21,6 +22,9 @@ type Container struct {
 
 	// Middleware provider
 	Middleware *middleware.Middleware
+
+	// Cache provider (in-memory, sau này có thể swap sang Redis)
+	Cache cache.Provider
 
 	// Notification dispatcher
 	NotifDispatcher *notif.Dispatcher
@@ -138,6 +142,9 @@ func NewContainer(db *gorm.DB) *Container {
 		c.ProjectRepo,
 	)
 
+	// --- Initialize Cache Provider (BR-PERM-05) ---
+	c.Cache = cache.NewMemoryCache()
+
 	// --- Initialize Notification Dispatcher ---
 	c.NotifDispatcher = notif.NewDispatcher(c.NotificationRepo)
 
@@ -149,7 +156,7 @@ func NewContainer(db *gorm.DB) *Container {
 	c.WorkspaceService = serviceImpl.NewWorkspaceService(tm, c.WorkspaceRepo, c.RoleRepo, c.RolePermissionRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.WorkspaceMemberService = serviceImpl.NewWorkspaceMemberService(c.WorkspaceMemberRepo, c.WorkspaceRepo, c.UserRepo, c.ProjectMemberRepo, tm, c.NotificationRepo, c.ActivityLogRepo)
 	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
-	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo)
+	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo, c.Cache)
 	c.RoleService = serviceImpl.NewRoleService(tm, c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.UserRepo)
 	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.ProjectMemberService = serviceImpl.NewProjectMemberService(tm, c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)

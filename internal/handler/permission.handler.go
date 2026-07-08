@@ -1,14 +1,15 @@
 package handler
 
 import (
-	_interface "TaskFlow-Go/internal/service/interface"
-	"TaskFlow-Go/internal/shared/apperror"
-	"TaskFlow-Go/internal/shared/appresponse"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	_interface "TaskFlow-Go/internal/service/interface"
+	"TaskFlow-Go/internal/shared/apperror"
+	"TaskFlow-Go/internal/shared/appresponse"
 )
 
 type PermissionHandler struct {
@@ -17,6 +18,24 @@ type PermissionHandler struct {
 
 func NewPermissionHandler(permissionService _interface.PermissionService) *PermissionHandler {
 	return &PermissionHandler{permissionService: permissionService}
+}
+
+// setCacheHeaders gắn ETag và Cache-Control vào response.
+// Nếu If-None-Match match → trả về 304, không gọi service.
+func (h *PermissionHandler) setCacheHeaders(c *gin.Context) bool {
+	etag := h.permissionService.GetPermissionsETag()
+	if etag == "" {
+		return false
+	}
+
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=3600")
+
+	if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+		c.Status(http.StatusNotModified)
+		return true
+	}
+	return false
 }
 
 // ListPermissions
@@ -31,6 +50,10 @@ func NewPermissionHandler(permissionService _interface.PermissionService) *Permi
 // @Failure      401  {object}  appresponse.Response
 // @Router       /permissions [get]
 func (h *PermissionHandler) ListPermissions(c *gin.Context) {
+	if h.setCacheHeaders(c) {
+		return
+	}
+
 	userID := c.GetString("user_id")
 	grouped, _ := strconv.ParseBool(c.DefaultQuery("grouped", "true"))
 	var Resp any
@@ -63,6 +86,10 @@ func (h *PermissionHandler) ListPermissions(c *gin.Context) {
 // @Failure      401  {object}  appresponse.Response
 // @Router       /permissions/modules [get]
 func (h *PermissionHandler) ListModules(c *gin.Context) {
+	if h.setCacheHeaders(c) {
+		return
+	}
+
 	userID := c.GetString("user_id")
 	result, err := h.permissionService.ListModules(userID)
 	if err != nil {
@@ -90,6 +117,10 @@ func (h *PermissionHandler) ListModules(c *gin.Context) {
 // @Failure      404  {object}  appresponse.Response
 // @Router       /permissions/modules/{module} [get]
 func (h *PermissionHandler) GetPermissionsByModule(c *gin.Context) {
+	if h.setCacheHeaders(c) {
+		return
+	}
+
 	userID := c.GetString("user_id")
 	module := c.Param("module")
 	result, err := h.permissionService.GetPermissionsByModule(userID, module)
@@ -118,6 +149,7 @@ func (h *PermissionHandler) GetPermissionsByModule(c *gin.Context) {
 // @Failure      404  {object}  appresponse.Response
 // @Router       /permissions/{id_or_slug} [get]
 func (h *PermissionHandler) GetPermissionByIdOrSlug(c *gin.Context) {
+	// Single permission — cache ít giá trị, bỏ qua ETag
 	userID := c.GetString("user_id")
 	idOrSlug := c.Param("id_or_slug")
 	result, err := h.permissionService.GetPermissionByIdOrSlug(userID, idOrSlug)

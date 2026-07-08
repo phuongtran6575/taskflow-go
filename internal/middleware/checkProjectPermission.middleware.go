@@ -89,11 +89,22 @@ func (m *Middleware) RequireProjectPermission(requiredSlugs ...string) gin.Handl
 		}
 		userID := userIDVal.(string)
 
-		// Workspace OWNER bypass project-level RBAC (BR-PRA-03)
-		// ADMIN không được bypass — phải qua project membership check
-		if wsRole, ok := c.Get("workspace_role"); ok {
-			role := wsRole.(string)
-			if role == "OWNER" {
+		// Workspace OWNER/ADMIN bypass project-level RBAC (BR-PERM-06).
+		// Nếu workspace_role chưa có trong context (route không gọi RequireWorkspaceRole),
+		// tự động query từ DB.
+		wsRoleVal, ok := c.Get("workspace_role")
+		if !ok {
+			wsID := c.Param("workspace_id")
+			if wsID != "" {
+				member, err := m.workspaceMemberRepo.GetByID(wsID, userID)
+				if err == nil {
+					wsRoleVal = string(member.Role)
+					c.Set("workspace_role", wsRoleVal)
+				}
+			}
+		}
+		if wsRoleStr, ok := wsRoleVal.(string); ok {
+			if wsRoleStr == "OWNER" || wsRoleStr == "ADMIN" {
 				c.Next()
 				return
 			}

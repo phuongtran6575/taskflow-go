@@ -1,10 +1,15 @@
 package implement
 
 import (
+	"crypto/sha1"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
+	"TaskFlow-Go/internal/cache"
 	"TaskFlow-Go/internal/dto"
 	repoInterface "TaskFlow-Go/internal/repository/interface"
 	_interface "TaskFlow-Go/internal/service/interface"
@@ -13,28 +18,72 @@ import (
 
 type permissionService struct {
 	permRepo repoInterface.PermissionRepository
+	cache    cache.Provider
 }
+
+const permissionsCacheKey = "permissions:all"
+const permissionsCacheTTL = 24 * time.Hour
 
 func NewPermissionService(
 	permRepo repoInterface.PermissionRepository,
+	cacheProvider cache.Provider,
 ) _interface.PermissionService {
 	return &permissionService{
 		permRepo: permRepo,
+		cache:    cacheProvider,
 	}
 }
 
-func (s *permissionService) ListFlatPermissions(userID string) (*dto.PermissionFlatResponse, error) {
-	permissions, err := s.permRepo.List()
+// getCachedPermissions lấy từ cache hoặc query DB + set cache.
+func (s *permissionService) getCachedPermissions() ([]dto.PermissionInfo, error) {
+	data, err := s.cache.GetOrSet(permissionsCacheKey, permissionsCacheTTL, func() ([]byte, error) {
+		perms, err := s.permRepo.List()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(perms)
+	})
 	if err != nil {
 		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to list permissions")
+	}
+	var perms []dto.PermissionInfo
+	if err := json.Unmarshal(data, &perms); err != nil {
+		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to unmarshal permissions")
+	}
+	return perms, nil
+}
+
+// computeETag tính SHA1 hash của permissions list để làm ETag.
+func (s *permissionService) computeETag(perms []dto.PermissionInfo) string {
+	h := sha1.New()
+	for _, p := range perms {
+		h.Write([]byte(p.ID))
+		h.Write([]byte(p.Slug))
+		h.Write([]byte(p.Module))
+	}
+	return fmt.Sprintf("\"%x\"", h.Sum(nil))
+}
+
+func (s *permissionService) GetPermissionsETag() string {
+	perms, err := s.getCachedPermissions()
+	if err != nil {
+		return ""
+	}
+	return s.computeETag(perms)
+}
+
+func (s *permissionService) ListFlatPermissions(userID string) (*dto.PermissionFlatResponse, error) {
+	permissions, err := s.getCachedPermissions()
+	if err != nil {
+		return nil, err
 	}
 	return &dto.PermissionFlatResponse{Data: permissions, Total: len(permissions)}, nil
 }
 
 func (s *permissionService) ListGroupedPermissions(userID string) (*dto.PermissionGroupedResponse, error) {
-	permissions, err := s.permRepo.List()
+	permissions, err := s.getCachedPermissions()
 	if err != nil {
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to list permissions")
+		return nil, err
 	}
 
 	grouped := make(map[string][]dto.PermissionInfo)
@@ -72,14 +121,21 @@ func (s *permissionService) ListModules(userID string) (*dto.ModuleListResponse,
 }
 
 func (s *permissionService) GetPermissionsByModule(userID string, module string) (*dto.ModulePermissionsResponse, error) {
-	result, err := s.permRepo.GetByModule(module)
+	allPerms, err := s.getCachedPermissions()
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &dto.ModulePermissionsResponse{Module: module, Data: []dto.PermissionInfo{}, Total: 0}, nil
-		}
-		return nil, apperror.NewAppError(500, "INTERNAL_ERROR", "Failed to get permissions")
+		return nil, err
 	}
-	return result, nil
+
+	var filtered []dto.PermissionInfo
+	for _, p := range allPerms {
+		if p.Module == module {
+			filtered = append(filtered, p)
+		}
+	}
+	if filtered == nil {
+		filtered = []dto.PermissionInfo{}
+	}
+	return &dto.ModulePermissionsResponse{Module: module, Data: filtered, Total: len(filtered)}, nil
 }
 
 func (s *permissionService) GetPermissionByIdOrSlug(userID string, idOrSlug string) (*dto.PermissionDetailResponse, error) {
