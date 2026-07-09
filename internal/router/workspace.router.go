@@ -1,6 +1,8 @@
 package router
 
 import (
+	"time"
+
 	"TaskFlow-Go/internal/handler"
 	"TaskFlow-Go/internal/middleware"
 
@@ -53,16 +55,34 @@ func (r *WorkspaceRouter) RegisterRoutes(api *gin.RouterGroup) {
 		members.DELETE("/me", r.mw.RequireWorkspaceRole(), r.memberHandler.LeaveWorkspace)
 	}
 
+	// BR-INV-08: Rate limiting cho public endpoint preview
 	invitesPublic := api.Group("/workspaces/:workspace_id/invites")
 	{
-		invitesPublic.GET("/preview/:code", r.inviteHandler.PreviewInvite)
+		invitesPublic.GET("/preview/:code", r.mw.RateLimiter(middleware.RateLimitConfig{
+			Enabled:                   true,
+			MaxReqs:                   10,
+			Window:                    time.Minute,
+			By:                        middleware.RateLimitByIP,
+			BlockOnConsecutiveFailures: true,
+			MaxConsecutiveFailures:     10,
+			BlockDuration:              15 * time.Minute,
+		}), r.inviteHandler.PreviewInvite)
 	}
 
+	// BR-INV-08: Rate limiting cho join endpoint (có auth nhưng vẫn rate theo IP)
 	invites := api.Group("/workspaces/:workspace_id/invites", auth)
 	{
 		invites.GET("/", r.mw.RequireWorkspaceRole(), r.inviteHandler.ListInvites)
 		invites.POST("/", r.mw.RequireWorkspaceRole("OWNER", "ADMIN"), r.inviteHandler.CreateInvite)
-		invites.POST("/join/:code", r.inviteHandler.JoinWorkspace) // join bằng invite link, không check role
+		invites.POST("/join/:code", r.mw.RateLimiter(middleware.RateLimitConfig{
+			Enabled:                   true,
+			MaxReqs:                   10,
+			Window:                    time.Minute,
+			By:                        middleware.RateLimitByIP,
+			BlockOnConsecutiveFailures: true,
+			MaxConsecutiveFailures:     10,
+			BlockDuration:              15 * time.Minute,
+		}), r.inviteHandler.JoinWorkspace)
 		invites.DELETE("/:invite_id", r.mw.RequireWorkspaceRole("OWNER", "ADMIN"), r.inviteHandler.RevokeInvite)
 	}
 }

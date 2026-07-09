@@ -167,6 +167,10 @@ func GenerateDescription(actorName string, metadata map[string]interface{}) stri
 		name, _ := metadata["name"].(string)
 		return fmt.Sprintf("%s đã xóa workspace %s", actor, name)
 
+	case EventMemberJoined:
+		role, _ := metadata["role"].(string)
+		return fmt.Sprintf("%s đã tham gia workspace với vai trò %s qua invite link", actor, role)
+
 	case EventCommentCreated:
 		preview, _ := metadata["content_preview"].(string)
 		mCount, _ := metadata["mention_count"].(float64)

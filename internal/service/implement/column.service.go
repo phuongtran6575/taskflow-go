@@ -27,6 +27,7 @@ type columnService struct {
 	projectRepo     repoInterface.ProjectRepository
 	activityLogRepo repoInterface.ActivityLogRepository
 	userRepo        repoInterface.UserRepository
+	wsHub           _interface.WebSocketHub
 }
 
 func NewColumnService(
@@ -35,6 +36,7 @@ func NewColumnService(
 	projectRepo repoInterface.ProjectRepository,
 	activityLogRepo repoInterface.ActivityLogRepository,
 	userRepo repoInterface.UserRepository,
+	wsHub _interface.WebSocketHub,
 ) _interface.ColumnService {
 	return &columnService{
 		tm:              tm,
@@ -42,6 +44,7 @@ func NewColumnService(
 		projectRepo:     projectRepo,
 		activityLogRepo: activityLogRepo,
 		userRepo:        userRepo,
+		wsHub:           wsHub,
 	}
 }
 
@@ -282,6 +285,12 @@ func (s *columnService) CreateColumn(workspaceID string, userID string, projectI
 	if err != nil {
 		return nil, err
 	}
+	if result != nil {
+		s.broadcastEvent(projectID, "column:created", map[string]interface{}{
+			"column":         result,
+			"broadcasted_by": userID,
+		})
+	}
 	return result, nil
 }
 
@@ -335,6 +344,13 @@ func (s *columnService) UpdateColumnTitle(workspaceID string, userID string, pro
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result != nil {
+		s.broadcastEvent(projectID, "column:title_updated", map[string]interface{}{
+			"column_id":      result.ID,
+			"title":          result.Title,
+			"updated_by":     userID,
+		})
 	}
 	return result, nil
 }
@@ -434,6 +450,18 @@ func (s *columnService) UpdateColumnPosition(workspaceID string, userID string, 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result != nil {
+		payload := map[string]interface{}{
+			"column_id":  result.ID,
+			"position":   result.Position,
+			"rebalanced": result.Rebalanced,
+			"updated_by": userID,
+		}
+		if result.AllColumns != nil {
+			payload["all_columns"] = result.AllColumns
+		}
+		s.broadcastEvent(projectID, "column:position_updated", payload)
 	}
 	return result, nil
 }
@@ -589,7 +617,27 @@ func (s *columnService) DeleteColumn(workspaceID string, userID string, projectI
 	if err != nil {
 		return nil, err
 	}
+	if result != nil {
+		payload := map[string]interface{}{
+			"column_id": result.DeletedColumnID,
+		}
+		if result.TasksMoved != nil {
+			payload["strategy"] = "move"
+			payload["tasks_moved"] = *result.TasksMoved
+			payload["target_column_id"] = result.TargetColumnID
+		} else if result.TasksDeleted != nil {
+			payload["strategy"] = "delete"
+			payload["tasks_deleted"] = *result.TasksDeleted
+		}
+		s.broadcastEvent(projectID, "column:deleted", payload)
+	}
 	return result, nil
+}
+
+func (s *columnService) broadcastEvent(projectID, event string, data map[string]interface{}) {
+	if s.wsHub != nil {
+		s.wsHub.BroadcastToRoom(projectID, event, data)
+	}
 }
 
 

@@ -16,6 +16,10 @@ func NewWorkspaceInviteRepository(db *gorm.DB) _interface.WorkspaceInviteReposit
 	return &workspaceInviteRepository{db: db}
 }
 
+func (r *workspaceInviteRepository) WithTx(tx *gorm.DB) _interface.WorkspaceInviteRepository {
+	return &workspaceInviteRepository{db: tx}
+}
+
 func (r *workspaceInviteRepository) Create(invite *models.WorkspaceInvite) error {
 	return r.db.Create(invite).Error
 }
@@ -32,6 +36,12 @@ func (r *workspaceInviteRepository) GetByCode(code string) (*models.WorkspaceInv
 	return &invite, err
 }
 
+func (r *workspaceInviteRepository) CountByCode(code string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.WorkspaceInvite{}).Where("code = ?", code).Count(&count).Error
+	return count, err
+}
+
 func (r *workspaceInviteRepository) IncrementUses(id string) error {
 	return r.db.Model(&models.WorkspaceInvite{}).Where("id = ?", id).
 		UpdateColumn("uses_count", gorm.Expr("uses_count + 1")).Error
@@ -41,10 +51,13 @@ func (r *workspaceInviteRepository) SoftDelete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&models.WorkspaceInvite{}).Error
 }
 
+// BR-INV-02: Đếm link thực sự ACTIVE (chưa revoked, chưa expired, chưa exhausted)
 func (r *workspaceInviteRepository) CountActiveByWorkspaceID(workspaceID string) (int64, error) {
 	var count int64
 	err := r.db.Model(&models.WorkspaceInvite{}).
 		Where("workspace_id = ? AND deleted_at IS NULL", workspaceID).
+		Where("(expires_at IS NULL OR expires_at > NOW())").
+		Where("(max_uses IS NULL OR uses_count < max_uses)").
 		Count(&count).Error
 	return count, err
 }

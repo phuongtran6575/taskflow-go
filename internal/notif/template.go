@@ -164,8 +164,8 @@ func BuildADDEDTOWORKSPACEForAdminTitle(userName string, workspaceName string) s
 	return fmt.Sprintf("%s đã tham gia %s", userName, workspaceName)
 }
 
-func BuildADDEDTOWORKSPACEForAdminContent(role string) string {
-	return fmt.Sprintf("Vai trò: %s. Tham gia qua invite link.", role)
+func BuildADDEDTOWORKSPACEForAdminContent(role string, createdByName string) string {
+	return fmt.Sprintf("%s đã tham gia với vai trò %s qua invite link của %s.", role, role, createdByName)
 }
 
 func BuildTASKDUESOONTitle(taskRef string) string {

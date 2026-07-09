@@ -1,6 +1,8 @@
 package job
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 
 	"TaskFlow-Go/internal/models"
@@ -40,8 +42,14 @@ func cascadeSoftDeleteProject(db *gorm.DB, projectID string) error {
 	}
 
 	if len(taskIDs) > 0 {
-		// Soft delete attachments (file records, physical files kept for 30 days)
-		if err := tx.Where("task_id IN ?", taskIDs).Delete(&models.Attachment{}).Error; err != nil {
+		// BR-PROJ-06: Soft delete attachments + set scheduled_delete_at = NOW() + 30 ngày
+		scheduledAt := time.Now().Add(30 * 24 * time.Hour)
+		if err := tx.Model(&models.Attachment{}).
+			Where("task_id IN ?", taskIDs).
+			Updates(map[string]interface{}{
+				"deleted_at":          time.Now(),
+				"scheduled_delete_at": scheduledAt,
+			}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}

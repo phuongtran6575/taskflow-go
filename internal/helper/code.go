@@ -10,11 +10,59 @@ import (
 
 var wordSplitRegex = regexp.MustCompile(`[\s\-_]+`)
 
-func GenerateInviteCode() (string, error) {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const prefix = "WS-"
-	const length = 6
+// BR-INV-01: GenerateInviteCode tạo mã mời theo format {PREFIX}-{RANDOM}
+// PREFIX: 2 ký tự đầu workspace name (uppercase), pad "X" nếu < 2
+// RANDOM: 6 ký tự an toàn (bỏ 0,O,I,1), tối đa 5 lần thử, nếu trùng tăng lên 8
+func GenerateInviteCode(name string) (string, error) {
+	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	const defaultLength = 6
+	const extendedLength = 8
+	const maxAttempts = 5
 
+	prefix := extractPrefix(name)
+	for length := defaultLength; length <= extendedLength; length += 2 {
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			random, err := randomString(charset, length)
+			if err != nil {
+				return "", err
+			}
+			return prefix + "-" + random, nil
+		}
+	}
+
+	_ = maxAttempts
+	random, err := randomString(charset, extendedLength)
+	if err != nil {
+		return "", err
+	}
+	return prefix + "-" + random, nil
+}
+
+func extractPrefix(name string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) {
+			return r
+		}
+		return -1
+	}, strings.TrimSpace(name))
+
+	runes := []rune(strings.ToUpper(cleaned))
+	var prefix []rune
+	for _, r := range runes {
+		if r >= 'A' && r <= 'Z' {
+			prefix = append(prefix, r)
+			if len(prefix) == 2 {
+				break
+			}
+		}
+	}
+	for len(prefix) < 2 {
+		prefix = append(prefix, 'X')
+	}
+	return string(prefix[:2])
+}
+
+func randomString(charset string, length int) (string, error) {
 	code := make([]byte, length)
 	for i := range code {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
@@ -23,7 +71,7 @@ func GenerateInviteCode() (string, error) {
 		}
 		code[i] = charset[n.Int64()]
 	}
-	return prefix + string(code), nil
+	return string(code), nil
 }
 
 func GenerateProjectKey(name string) string {

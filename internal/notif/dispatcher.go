@@ -237,11 +237,12 @@ func (d *Dispatcher) DispatchADDEDTOWORKSPACEForUser(in *ADDEDTOWORKSPACEForUser
 }
 
 type ADDEDTOWORKSPACEForAdminInput struct {
-	AdminIDs      []string
-	UserName      string
-	WorkspaceName string
-	Role          string
-	WorkspaceID   string
+	AdminIDs       []string
+	UserName       string
+	WorkspaceName  string
+	Role           string
+	WorkspaceID    string
+	CreatedByName  string // BR-INV-07: Người tạo invite link
 }
 
 func (d *Dispatcher) DispatchADDEDTOWORKSPACEForAdmin(in *ADDEDTOWORKSPACEForAdminInput) {
@@ -249,7 +250,7 @@ func (d *Dispatcher) DispatchADDEDTOWORKSPACEForAdmin(in *ADDEDTOWORKSPACEForAdm
 		return
 	}
 	title := BuildADDEDTOWORKSPACEForAdminTitle(in.UserName, in.WorkspaceName)
-	content := BuildADDEDTOWORKSPACEForAdminContent(in.Role)
+	content := BuildADDEDTOWORKSPACEForAdminContent(in.Role, in.CreatedByName)
 	refURL := BuildADDEDTOWORKSPACEURL(in.WorkspaceID)
 	d.createNotification(models.NotificationTypeADDEDTOWORKSPACE, nil, title, content, refURL, in.AdminIDs)
 }

@@ -12,6 +12,7 @@ import (
 	"TaskFlow-Go/internal/router"
 	serviceImpl "TaskFlow-Go/internal/service/implement"
 	_interface "TaskFlow-Go/internal/service/interface"
+	"TaskFlow-Go/internal/ws"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,6 +20,9 @@ import (
 
 type Container struct {
 	DB *gorm.DB
+
+	// WebSocket Hub (real-time sync)
+	WSHub *ws.Hub
 
 	// Middleware provider
 	Middleware *middleware.Middleware
@@ -134,19 +138,24 @@ func NewContainer(db *gorm.DB) *Container {
 	// --- Initialize Background Job Dispatcher ---
 	dispatcher := job.NewDispatcher(db)
 
+	// --- Initialize Cache Provider (BR-PERM-05) ---
+	c.Cache = cache.NewMemoryCache()
+
 	// --- Initialize Middleware Provider ---
 	c.Middleware = middleware.NewMiddleware(
 		c.WorkspaceMemberRepo,
 		c.WorkspaceRepo,
 		c.ProjectMemberRepo,
 		c.ProjectRepo,
+		c.Cache,
 	)
-
-	// --- Initialize Cache Provider (BR-PERM-05) ---
-	c.Cache = cache.NewMemoryCache()
 
 	// --- Initialize Notification Dispatcher ---
 	c.NotifDispatcher = notif.NewDispatcher(c.NotificationRepo)
+
+	// --- Initialize WebSocket Hub ---
+	c.WSHub = ws.NewHub()
+	go c.WSHub.Run()
 
 	// --- Initialize Services ---
 	c.AvatarStorage = serviceImpl.NewAvatarStorageService()
@@ -155,12 +164,12 @@ func NewContainer(db *gorm.DB) *Container {
 	c.SessionService = serviceImpl.NewSessionService(c.SessionRepo)
 	c.WorkspaceService = serviceImpl.NewWorkspaceService(tm, c.WorkspaceRepo, c.RoleRepo, c.RolePermissionRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.WorkspaceMemberService = serviceImpl.NewWorkspaceMemberService(c.WorkspaceMemberRepo, c.WorkspaceRepo, c.UserRepo, c.ProjectMemberRepo, tm, c.NotificationRepo, c.ActivityLogRepo)
-	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
+	c.WorkspaceInviteService = serviceImpl.NewWorkspaceInviteService(c.WorkspaceInviteRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.NotificationRepo, c.UserRepo, c.ActivityLogRepo, c.NotifDispatcher, tm)
 	c.PermissionService = serviceImpl.NewPermissionService(c.PermissionRepo, c.Cache)
 	c.RoleService = serviceImpl.NewRoleService(tm, c.RoleRepo, c.RolePermissionRepo, c.PermissionRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.UserRepo)
 	c.ProjectService = serviceImpl.NewProjectService(tm, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.WorkspaceRepo, c.RoleRepo, c.ActivityLogRepo, c.UserRepo, dispatcher)
 	c.ProjectMemberService = serviceImpl.NewProjectMemberService(tm, c.ProjectMemberRepo, c.WorkspaceMemberRepo, c.WorkspaceRepo, c.ProjectRepo, c.RoleRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher)
-	c.ColumnService = serviceImpl.NewColumnService(tm, c.ColumnRepo, c.ProjectRepo, c.ActivityLogRepo, c.UserRepo)
+	c.ColumnService = serviceImpl.NewColumnService(tm, c.ColumnRepo, c.ProjectRepo, c.ActivityLogRepo, c.UserRepo, c.WSHub)
 	c.TaskService = serviceImpl.NewTaskService(tm, c.TaskRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ProjectRepo, c.ColumnRepo, c.ProjectMemberRepo, c.LabelRepo, c.WorkspaceRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
 	c.TaskAssigneeService = serviceImpl.NewTaskAssigneeService(c.TaskRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.WorkspaceRepo, c.NotificationRepo, c.ActivityLogRepo, c.UserRepo, c.NotifDispatcher, tm)
 	c.TaskBoardService = serviceImpl.NewTaskBoardService(tm, c.TaskRepo, c.ColumnRepo, c.ProjectRepo, c.ProjectMemberRepo, c.TaskAssigneeRepo, c.TaskLabelRepo, c.ActivityLogRepo, c.NotificationRepo, c.UserRepo, c.NotifDispatcher)
@@ -217,5 +226,6 @@ func (c *Container) SetupRoutes(api *gin.RouterGroup) {
 		c.TaskRouter,
 		c.NotificationRouter,
 		c.ActivityLogRouter,
+		c.WSHub,
 	)
 }

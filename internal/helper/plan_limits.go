@@ -18,6 +18,7 @@ type ResourceLimits struct {
 	AllowCustomRoles         bool
 	ActivityLogRetentionDays int
 	MaxSessionsPerUser       int
+	MaxActiveInvites         int64 // BR-INV-03: Giới hạn invite link ACTIVE tối đa
 }
 
 var planLimits = map[models.WorkspacePlan]ResourceLimits{
@@ -29,6 +30,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 		AllowCustomRoles:         false,
 		ActivityLogRetentionDays: 7,
 		MaxSessionsPerUser:       3,
+		MaxActiveInvites:         3,
 	},
 	models.WorkspacePlanPRO: {
 		MaxMembers:               50,
@@ -38,6 +40,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 		AllowCustomRoles:         true,
 		ActivityLogRetentionDays: 90,
 		MaxSessionsPerUser:       10,
+		MaxActiveInvites:         20,
 	},
 	models.WorkspacePlanENTERPRISE: {
 		MaxMembers:               -1,
@@ -47,6 +50,7 @@ var planLimits = map[models.WorkspacePlan]ResourceLimits{
 		AllowCustomRoles:         true,
 		ActivityLogRetentionDays: 365,
 		MaxSessionsPerUser:       -1,
+		MaxActiveInvites:         -1,
 	},
 }
 
@@ -106,6 +110,17 @@ func CheckCustomRolesAllowed(plan models.WorkspacePlan) error {
 	limits := GetPlanLimits(plan)
 	if !limits.AllowCustomRoles {
 		return apperror.ErrCustomRolesNotAllowed
+	}
+	return nil
+}
+
+func CheckInviteLimit(plan models.WorkspacePlan, currentActive int64) error {
+	limits := GetPlanLimits(plan)
+	if limits.MaxActiveInvites == -1 {
+		return nil
+	}
+	if currentActive >= limits.MaxActiveInvites {
+		return apperror.ErrInviteLinkLimitReached
 	}
 	return nil
 }

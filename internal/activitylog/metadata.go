@@ -285,6 +285,16 @@ func OwnershipTransferred(fromUserID, fromFullName, toUserID, toFullName string)
 	}
 }
 
+func MemberJoined(userID, role, inviteID string) map[string]interface{} {
+	return map[string]interface{}{
+		"event":     EventMemberJoined,
+		"user_id":   userID,
+		"role":      role,
+		"via":       "invite_link",
+		"invite_id": inviteID,
+	}
+}
+
 func CommentCreated(commentID, contentPreview string, mentionCount int) map[string]interface{} {
 	return map[string]interface{}{
 		"event":          EventCommentCreated,

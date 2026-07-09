@@ -31,4 +31,6 @@ const (
 	EventOwnershipTransferred     = "ownership_transferred"
 
 	EventCommentCreated = "comment_created"
+
+	EventMemberJoined = "member_joined" // BR-INV-07: Thành viên join workspace qua invite
 )

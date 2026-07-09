@@ -1,6 +1,8 @@
 package router
 
 import (
+	"TaskFlow-Go/internal/ws"
+
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -17,6 +19,7 @@ func SetupRoutes(
 	task *TaskRouter,
 	notification *NotificationRouter,
 	activityLog *ActivityLogRouter,
+	hub *ws.Hub,
 ) {
 	api.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
@@ -29,4 +32,8 @@ func SetupRoutes(
 	task.RegisterRoutes(api)
 	notification.RegisterRoutes(api)
 	activityLog.RegisterRoutes(api)
+
+	// WebSocket routes
+	api.GET("/ws", ws.WSHandler(hub))
+	api.GET("/ws/projects/:project_id", ws.WSProjectHandler(hub))
 }
